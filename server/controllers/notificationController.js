@@ -3,9 +3,11 @@ const User         = require("../models/User");
 
 const getNotifications = async (req, res) => {
   try {
-    const notifications = await Notification.find({ recipient: req.user._id })
-      .populate("sender", "name role").sort({ createdAt: -1 }).limit(50);
-    res.status(200).json(notifications);
+    const list = await Notification.find({ recipient: req.user._id })
+      .populate("sender", "name role")
+      .sort({ createdAt: -1 })
+      .limit(50);
+    res.status(200).json(list);
   } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
@@ -18,7 +20,10 @@ const getUnreadCount = async (req, res) => {
 
 const markRead = async (req, res) => {
   try {
-    await Notification.findByIdAndUpdate(req.params.id, { read: true });
+    await Notification.findOneAndUpdate(
+      { _id: req.params.id, recipient: req.user._id },
+      { read: true }
+    );
     res.status(200).json({ message: "Marked as read" });
   } catch (err) { res.status(500).json({ message: err.message }); }
 };
@@ -30,7 +35,7 @@ const markAllRead = async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
-// Admin: send announcement to all users or specific role
+// Admin: broadcast announcement
 const sendAnnouncement = async (req, res) => {
   try {
     const { title, message, targetRole } = req.body;
@@ -40,21 +45,31 @@ const sendAnnouncement = async (req, res) => {
     const users = await User.find(query).select("_id");
 
     const notifs = users.map(u => ({
-      recipient: u._id, sender: req.user._id, type: "general",
-      title, message, link: "/dashboard", data: {},
+      recipient: u._id, sender: req.user._id,
+      type: "general", title, message, link: "/dashboard", data: {},
     }));
     await Notification.insertMany(notifs);
+
+    // Real-time push via socket
+    const io = req.app.get("io");
+    if (io) {
+      users.forEach(u => {
+        io.to(`user:${u._id}`).emit("notification:new", { type: "general", title, message });
+      });
+    }
+
     res.status(201).json({ message: `Announcement sent to ${users.length} users.` });
   } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
-// Admin: get all notifications
 const getAllNotifications = async (req, res) => {
   try {
-    const notifications = await Notification.find()
-      .populate("sender", "name role").populate("recipient", "name role")
-      .sort({ createdAt: -1 }).limit(100);
-    res.status(200).json(notifications);
+    const list = await Notification.find()
+      .populate("sender",    "name role")
+      .populate("recipient", "name role")
+      .sort({ createdAt: -1 })
+      .limit(100);
+    res.status(200).json(list);
   } catch (err) { res.status(500).json({ message: err.message }); }
 };
 

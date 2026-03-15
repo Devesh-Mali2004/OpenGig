@@ -4,6 +4,7 @@ import Chat from "../components/Chat";
 import NotificationBell from "../components/NotificationBell";
 import Spinner from "../components/Spinner";
 import { useAuth } from "../context/AuthContext";
+import { useSocket } from "../context/SocketContext";
 import {
   getMyCoursesAPI, createCourseAPI, deleteCourseAPI,
   getCourseStudentsAPI, updateProfileAPI,
@@ -23,44 +24,44 @@ const NAV = [
   { id:"profile",   label:"Profile",    icon:"👤" },
 ];
 
-const EMPTY_FORM = { title:"", description:"", category:"", price:"", zoomLink:"", level:"Beginner", duration:"" };
+const EMPTY = { title:"", description:"", category:"", price:"", zoomLink:"", level:"Beginner", duration:"" };
 
 export default function TrainerDashboard() {
-  const [tab,            setTab]            = useState("dashboard");
-  const [showForm,       setShowForm]       = useState(false);
-  const [form,           setForm]           = useState(EMPTY_FORM);
-  const [formError,      setFormError]      = useState("");
-  const [formLoading,    setFormLoading]    = useState(false);
-  const [selectedCourse, setSelectedCourse] = useState(null);
-  const [students,       setStudents]       = useState([]);
-  const [loadStudents,   setLoadStudents]   = useState(false);
-  const [toast,          setToast]          = useState(null);
-  const [courses,        setCourses]        = useState([]);
-  const [loadingC,       setLoadingC]       = useState(true);
-  const [search,         setSearch]         = useState("");
-  const [profileForm,    setProfileForm]    = useState({ name:"", phone:"", bio:"", expertise:"" });
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [profileError,   setProfileError]   = useState("");
-  const [liveForm,       setLiveForm]       = useState({ title:"", courseId:"" });
-  const [isLive,         setIsLive]         = useState(false);
-  const [currentSession, setCurrentSession] = useState(null);
-  const [liveLoading,    setLiveLoading]    = useState(false);
-  const [liveError,      setLiveError]      = useState("");
-  const [pastSessions,   setPastSessions]   = useState([]);
-  const [stats,          setStats]          = useState({ totalCourses:0, totalEnrollments:0, totalSessions:0, liveNow:false });
-  const [reviews,        setReviews]        = useState([]);
-  const [loadingRev,     setLoadingRev]     = useState(false);
-  const statsRef = useRef(null);
-  const { user } = useAuth();
+  const [tab,         setTab]         = useState("dashboard");
+  const [courses,     setCourses]     = useState([]);
+  const [loadingC,    setLoadingC]    = useState(true);
+  const [search,      setSearch]      = useState("");
+  const [showForm,    setShowForm]    = useState(false);
+  const [form,        setForm]        = useState(EMPTY);
+  const [formErr,     setFormErr]     = useState("");
+  const [formBusy,    setFormBusy]    = useState(false);
+  const [selected,    setSelected]    = useState(null);
+  const [students,    setStudents]    = useState([]);
+  const [loadingS,    setLoadingS]    = useState(false);
+  const [reviews,     setReviews]     = useState([]);
+  const [loadingR,    setLoadingR]    = useState(false);
+  const [stats,       setStats]       = useState({ totalCourses:0, totalEnrollments:0, totalSessions:0, liveNow:false });
+  const [liveForm,    setLiveForm]    = useState({ title:"", courseId:"", customLink:"" });
+  const [isLive,      setIsLive]      = useState(false);
+  const [liveSession, setLiveSession] = useState(null);
+  const [liveBusy,    setLiveBusy]    = useState(false);
+  const [liveErr,     setLiveErr]     = useState("");
+  const [pastSessions,setPastSessions]= useState([]);
+  const [profile,     setProfile]     = useState({ name:"", phone:"", bio:"", expertise:"" });
+  const [profBusy,    setProfBusy]    = useState(false);
+  const [profErr,     setProfErr]     = useState("");
+  const [toast,       setToast]       = useState(null);
+  const { user }   = useAuth();
+  const { socket } = useSocket() || {};
+  const statsRef   = useRef(null);
+
+  useEffect(() => { document.title = `${NAV.find(n=>n.id===tab)?.label||"Dashboard"} — Trainer`; }, [tab]);
 
   useEffect(() => {
-    document.title = `${NAV.find(n=>n.id===tab)?.label||"Dashboard"} — OpenGig Trainer`;
-    return () => { document.title = "OpenGig"; };
-  }, [tab]);
-
-  useEffect(() => {
-    if (user) setProfileForm({ name:user.name||"", phone:user.phone||"", bio:user.bio||"", expertise:Array.isArray(user.expertise)?user.expertise.join(", "):"" });
+    if (user) setProfile({ name:user.name||"", phone:user.phone||"", bio:user.bio||"", expertise:Array.isArray(user.expertise)?user.expertise.join(", "):"" });
   }, [user]);
+
+  const showToast = (msg, type="success") => { setToast({msg,type}); setTimeout(()=>setToast(null),4000); };
 
   const fetchCourses = useCallback(async () => {
     setLoadingC(true);
@@ -69,7 +70,7 @@ export default function TrainerDashboard() {
   }, []);
 
   const fetchStats = useCallback(async () => {
-    try { const r = await getTrainerStatsAPI(); setStats(r.data); } catch {}
+    try { const r = await getTrainerStatsAPI(); setStats(r.data||stats); } catch {}
   }, []);
 
   const fetchSessions = useCallback(async () => {
@@ -78,98 +79,107 @@ export default function TrainerDashboard() {
 
   useEffect(() => {
     fetchCourses(); fetchStats(); fetchSessions();
-    statsRef.current = setInterval(fetchStats, 15000);
+    statsRef.current = setInterval(fetchStats, 20000);
     return () => clearInterval(statsRef.current);
   }, [fetchCourses, fetchStats, fetchSessions]);
 
-  // Load reviews when tab opens
+  // Real-time: if someone enrolls, refresh stats
   useEffect(() => {
-    if (tab==="reviews" && courses.length>0) {
-      setLoadingRev(true);
-      Promise.all(courses.map(c => getCourseReviewsAPI(c._id).catch(()=>({data:{reviews:[],avgRating:0}}))))
-        .then(results => {
-          const all = courses.map((c,i) => ({
-            course: c,
-            reviews: results[i]?.data?.reviews||[],
-            avgRating: results[i]?.data?.avgRating||0,
-          }));
-          setReviews(all);
-        })
-        .finally(() => setLoadingRev(false));
-    }
-  }, [tab, courses.length]);
+    if (!socket) return;
+    socket.on("enrollment:new", () => fetchStats());
+    return () => socket.off("enrollment:new");
+  }, [socket, fetchStats]);
 
-  const toast_ = (msg, type="success") => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
-  const filtered = courses.filter(c => c.title?.toLowerCase().includes(search.toLowerCase())||c.category?.toLowerCase().includes(search.toLowerCase()));
+  const filtered = courses.filter(c =>
+    c.title?.toLowerCase().includes(search.toLowerCase()) ||
+    c.category?.toLowerCase().includes(search.toLowerCase())
+  );
 
-  const handleCreate = async (e) => {
-    e.preventDefault(); setFormError("");
-    if (!form.title||!form.category) { setFormError("Title and Category required!"); return; }
-    setFormLoading(true);
+  // Create course
+  const handleCreate = async e => {
+    e.preventDefault(); setFormErr("");
+    if (!form.title||!form.description||!form.category) { setFormErr("Title, description and category are required."); return; }
+    setFormBusy(true);
     try {
       const r = await createCourseAPI({...form, price:Number(form.price)||0});
       setCourses(p=>[r.data,...p]);
-      setForm(EMPTY_FORM); setShowForm(false);
-      toast_("Course created! 🎉 Trainees can now see it.");
+      setForm(EMPTY); setShowForm(false);
+      showToast("Course created! 🎉 Trainees can now see and enroll.");
       fetchStats();
-    } catch(e) { setFormError(e?.response?.data?.message||"Failed."); }
-    finally { setFormLoading(false); }
+    } catch(e) { setFormErr(e?.response?.data?.message||"Failed."); }
+    finally { setFormBusy(false); }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Delete this course?")) return;
-    try { await deleteCourseAPI(id); setCourses(p=>p.filter(c=>c._id!==id)); toast_("Course deleted."); fetchStats(); }
-    catch { toast_("Delete failed.","error"); }
+  // Delete course
+  const handleDelete = async id => {
+    if (!window.confirm("Delete this course permanently?")) return;
+    try {
+      await deleteCourseAPI(id);
+      setCourses(p=>p.filter(c=>c._id!==id));
+      showToast("Course deleted."); fetchStats();
+    } catch { showToast("Delete failed.","error"); }
   };
 
-  const handleViewStudents = async (course) => {
-    setSelectedCourse(course); setTab("students"); setLoadStudents(true); setStudents([]);
+  // View students
+  const handleStudents = async course => {
+    setSelected(course); setTab("students"); setLoadingS(true); setStudents([]);
     try { const r = await getCourseStudentsAPI(course._id); setStudents(Array.isArray(r.data)?r.data:[]); }
-    catch { toast_("Failed to load students.","error"); }
-    finally { setLoadStudents(false); }
+    catch { showToast("Failed to load students.","error"); }
+    finally { setLoadingS(false); }
   };
 
-  const handleGoLive = async (e) => {
-    e.preventDefault(); setLiveError("");
-    if (!liveForm.title) { setLiveError("Session title is required!"); return; }
-    setLiveLoading(true);
+  // Load reviews when tab opens
+  useEffect(() => {
+    if (tab!=="reviews"||courses.length===0) return;
+    setLoadingR(true);
+    Promise.all(courses.map(c=>getCourseReviewsAPI(c._id).catch(()=>({data:{reviews:[],avgRating:0}}))))
+      .then(results=>setReviews(courses.map((c,i)=>({ course:c, reviews:results[i]?.data?.reviews||[], avgRating:results[i]?.data?.avgRating||0 }))))
+      .finally(()=>setLoadingR(false));
+  }, [tab, courses.length]);
+
+  // Go Live
+  const handleGoLive = async e => {
+    e.preventDefault(); setLiveErr("");
+    if (!liveForm.title.trim()) { setLiveErr("Session title is required."); return; }
+    setLiveBusy(true);
     try {
       const r = await goLiveAPI(liveForm);
-      setCurrentSession(r.data.session); setIsLive(true);
-      toast_(`🔴 You're live! Meeting link auto-generated.`);
-      fetchStats();
-    } catch(e) { setLiveError(e?.response?.data?.message||"Failed to go live."); }
-    finally { setLiveLoading(false); }
+      setLiveSession(r.data.session); setIsLive(true);
+      showToast(`🔴 Live! Meeting link: ${r.data.meetingLink}`);
+      fetchStats(); fetchSessions();
+    } catch(e) { setLiveErr(e?.response?.data?.message||"Failed to go live."); }
+    finally { setLiveBusy(false); }
   };
 
   const handleEndLive = async () => {
-    if (!currentSession) return;
+    if (!liveSession) return;
     try {
-      const { endLiveAPI } = await import("../api/api");
-      await endLiveAPI(currentSession._id);
-      setIsLive(false); setCurrentSession(null); setLiveForm({title:"",courseId:""});
-      toast_("Session ended."); fetchStats(); fetchSessions();
-    } catch { toast_("Failed.","error"); }
+      await endLiveAPI(liveSession._id);
+      setIsLive(false); setLiveSession(null); setLiveForm({title:"",courseId:"",customLink:""});
+      showToast("Session ended."); fetchStats(); fetchSessions();
+    } catch { showToast("Failed.","error"); }
   };
 
-  const handleProfileSave = async (e) => {
-    e.preventDefault(); setProfileError(""); setProfileLoading(true);
+  // Save profile
+  const handleProfile = async e => {
+    e.preventDefault(); setProfErr(""); setProfBusy(true);
     try {
-      const p = { name:profileForm.name, phone:profileForm.phone, bio:profileForm.bio, expertise:profileForm.expertise.split(",").map(s=>s.trim()).filter(Boolean) };
+      const p = { name:profile.name, phone:profile.phone, bio:profile.bio, expertise:profile.expertise.split(",").map(s=>s.trim()).filter(Boolean) };
       await updateProfileAPI(p);
       localStorage.setItem("opengig_user", JSON.stringify({...user,...p}));
-      toast_("Profile updated! ✅");
-    } catch(e) { setProfileError(e?.response?.data?.message||"Failed."); }
-    finally { setProfileLoading(false); }
+      showToast("Profile saved! ✅");
+    } catch(e) { setProfErr(e?.response?.data?.message||"Failed."); }
+    finally { setProfBusy(false); }
   };
 
-  const stars = (n) => [1,2,3,4,5].map(i=><span key={i} style={{color:i<=n?"#f59e0b":"#d1d5db",fontSize:16}}>★</span>);
+  const stars = n => [1,2,3,4,5].map(i=><span key={i} style={{color:i<=n?"#f59e0b":"#e5e7eb",fontSize:14}}>★</span>);
 
   return (
     <div style={{display:"flex",minHeight:"100vh",background:"#f9fafb",fontFamily:"ui-sans-serif,system-ui,sans-serif"}}>
       <Sidebar activeTab={tab} setActiveTab={setTab} navItems={NAV} role="trainer"/>
 
-      <main style={{marginLeft:220,flex:1,display:"flex",flexDirection:"column",minHeight:"100vh"}}>
+      <main style={{marginLeft:220,flex:1,display:"flex",flexDirection:"column"}}>
+        {/* Topbar */}
         <header style={{background:"#fff",borderBottom:"1px solid #f3f4f6",padding:"12px 28px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:30}}>
           <div>
             <h2 style={{fontSize:16,fontWeight:700,color:"#111827",margin:0}}>{getGreeting()}, {user?.name?.split(" ")[0]} 👋</h2>
@@ -185,18 +195,15 @@ export default function TrainerDashboard() {
                 onChange={e=>{setSearch(e.target.value);setTab("courses");}}
                 style={{paddingLeft:30,paddingRight:12,paddingTop:7,paddingBottom:7,fontSize:12,border:"1px solid #e5e7eb",borderRadius:8,width:180,background:"#f9fafb",color:"#111827",outline:"none"}}/>
             </div>
-            <button onClick={()=>setTab("live")}
-              style={{background:isLive?"#dc2626":"#ef4444",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            <button onClick={()=>setTab("live")} style={{background:isLive?"#dc2626":"#ef4444",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
               {isLive?"🔴 Live":"🎥 Go Live"}
             </button>
             <NotificationBell/>
-            <button onClick={()=>{setShowForm(true);setTab("courses");}}
-              style={{background:"#0d9488",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-              + Course
-            </button>
+            <button onClick={()=>{setShowForm(true);setTab("courses");}} style={{background:"#0d9488",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,fontWeight:600,cursor:"pointer"}}>+ Course</button>
           </div>
         </header>
 
+        {/* Toast */}
         {toast&&<div style={{position:"fixed",bottom:"2rem",right:"2rem",zIndex:9999,padding:"0.75rem 1.5rem",borderRadius:10,fontWeight:600,fontSize:14,background:toast.type==="error"?"#fef2f2":"#f0fdf4",color:toast.type==="error"?"#dc2626":"#16a34a",border:`1px solid ${toast.type==="error"?"#fca5a5":"#86efac"}`,boxShadow:"0 4px 20px rgba(0,0,0,0.1)"}}>{toast.msg}</div>}
 
         <div style={{padding:"24px 28px",flex:1}}>
@@ -208,35 +215,33 @@ export default function TrainerDashboard() {
                 {[["Courses",stats.totalCourses,"📚","#0f766e"],["Enrollments",stats.totalEnrollments,"👥","#7c3aed"],["Sessions",stats.totalSessions,"🎥","#ea580c"],["Status",stats.liveNow?"🔴 Live":"⚫ Offline","📡",stats.liveNow?"#dc2626":"#6b7280"]].map(([l,v,i,c])=>(
                   <div key={l} style={{background:"#fff",borderRadius:12,padding:"16px 18px",border:"1px solid #f3f4f6",display:"flex",alignItems:"center",gap:12}}>
                     <span style={{fontSize:24}}>{i}</span>
-                    <div><p style={{fontSize:20,fontWeight:800,color:c,margin:0}}>{v}</p><p style={{fontSize:12,color:"#6b7280",margin:0}}>{l}</p></div>
+                    <div><p style={{fontSize:22,fontWeight:800,color:c,margin:0}}>{v}</p><p style={{fontSize:12,color:"#6b7280",margin:0}}>{l}</p></div>
                   </div>
                 ))}
               </div>
-              {isLive&&currentSession&&(
-                <div style={{background:"linear-gradient(135deg,#fef2f2,#fee2e2)",border:"1px solid #fca5a5",borderRadius:12,padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              {isLive&&liveSession&&(
+                <div style={{background:"#fef2f2",border:"2px solid #fca5a5",borderRadius:12,padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div>
                     <p style={{margin:0,fontWeight:700,color:"#dc2626",fontSize:14}}>🔴 You are LIVE</p>
-                    <p style={{margin:"4px 0 0",color:"#6b7280",fontSize:12}}>{currentSession.title}</p>
-                    <p style={{margin:"2px 0 0",color:"#0d9488",fontSize:11}}>🔗 {currentSession.zoomLink}</p>
+                    <p style={{margin:"4px 0 2px",color:"#374151",fontSize:13}}>{liveSession.title}</p>
+                    <a href={liveSession.zoomLink} target="_blank" rel="noreferrer" style={{fontSize:12,color:"#0d9488",wordBreak:"break-all"}}>{liveSession.zoomLink}</a>
                   </div>
-                  <div style={{display:"flex",gap:10}}>
-                    <button onClick={()=>window.open(currentSession.zoomLink,"_blank","noopener,noreferrer")}
-                      style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>Open Zoom</button>
-                    <button onClick={handleEndLive}
-                      style={{background:"#dc2626",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>End Session</button>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>window.open(liveSession.zoomLink,"_blank","noopener,noreferrer")} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>Open Meeting</button>
+                    <button onClick={handleEndLive} style={{background:"#dc2626",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>⏹ End</button>
                   </div>
                 </div>
               )}
               <section>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <h3 style={{fontSize:15,fontWeight:700,color:"#111827",margin:0}}>Recent Courses</h3>
-                  <button onClick={()=>setTab("courses")} style={{fontSize:12,color:"#0d9488",background:"transparent",border:"none",cursor:"pointer",fontWeight:500}}>View all →</button>
+                  <button onClick={()=>setTab("courses")} style={{fontSize:12,color:"#0d9488",background:"transparent",border:"none",cursor:"pointer"}}>View all →</button>
                 </div>
                 {loadingC?<Spinner/>:courses.length===0?(
-                  <EmptyState icon="📚" title="No courses yet" desc="Create your first course!" action="Create Course" onAction={()=>{setShowForm(true);setTab("courses");}}/>
+                  <Empty icon="📚" title="No courses yet" desc="Create your first course!" btn="Create Course" onBtn={()=>{setShowForm(true);setTab("courses");}}/>
                 ):(
                   <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14}}>
-                    {courses.slice(0,3).map(c=><CourseCard key={c._id} course={c} onDelete={handleDelete} onStudents={handleViewStudents}/>)}
+                    {courses.slice(0,3).map(c=><CourseCard key={c._id} course={c} onDelete={handleDelete} onStudents={handleStudents}/>)}
                   </div>
                 )}
               </section>
@@ -248,22 +253,21 @@ export default function TrainerDashboard() {
             <div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
                 <h2 style={{fontSize:18,fontWeight:700,color:"#111827",margin:0}}>My Courses <span style={{fontSize:13,color:"#9ca3af",fontWeight:400}}>({filtered.length})</span></h2>
-                <button onClick={()=>setShowForm(!showForm)}
-                  style={{background:showForm?"#fef2f2":"#0d9488",color:showForm?"#dc2626":"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                <button onClick={()=>setShowForm(!showForm)} style={{background:showForm?"#fef2f2":"#0d9488",color:showForm?"#dc2626":"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>
                   {showForm?"✕ Cancel":"+ Add Course"}
                 </button>
               </div>
               {showForm&&(
                 <div style={{background:"#fff",borderRadius:12,border:"1px solid #e5e7eb",padding:24,marginBottom:24}}>
                   <h3 style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:16}}>Create New Course</h3>
-                  {formError&&<div style={{background:"#fef2f2",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:12}}>⚠️ {formError}</div>}
+                  {formErr&&<div style={{background:"#fef2f2",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:12}}>⚠️ {formErr}</div>}
                   <form onSubmit={handleCreate}>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
-                      <FF label="Title *"    value={form.title}       onChange={v=>setForm(p=>({...p,title:v}))}       placeholder="e.g. React Masterclass"/>
-                      <FF label="Category *" value={form.category}    onChange={v=>setForm(p=>({...p,category:v}))}    placeholder="e.g. Web Dev"/>
-                      <FF label="Price (₹)"  value={form.price}       onChange={v=>setForm(p=>({...p,price:v}))}       placeholder="0 for Free" type="number"/>
-                      <FF label="Duration"   value={form.duration}    onChange={v=>setForm(p=>({...p,duration:v}))}    placeholder="e.g. 8 weeks"/>
-                      <FF label="Zoom Link (optional)" value={form.zoomLink} onChange={v=>setForm(p=>({...p,zoomLink:v}))} placeholder="https://zoom.us/j/..."/>
+                      <F label="Title *"       value={form.title}       onChange={v=>setForm(p=>({...p,title:v}))}       ph="e.g. React Masterclass"/>
+                      <F label="Category *"    value={form.category}    onChange={v=>setForm(p=>({...p,category:v}))}    ph="e.g. Web Dev"/>
+                      <F label="Price (₹)"     value={form.price}       onChange={v=>setForm(p=>({...p,price:v}))}       ph="0 for Free" type="number"/>
+                      <F label="Duration"      value={form.duration}    onChange={v=>setForm(p=>({...p,duration:v}))}    ph="e.g. 8 weeks"/>
+                      <F label="Zoom/Meet Link (optional)" value={form.zoomLink} onChange={v=>setForm(p=>({...p,zoomLink:v}))} ph="https://meet.jit.si/..."/>
                       <div>
                         <label style={LS}>Level</label>
                         <select value={form.level} onChange={e=>setForm(p=>({...p,level:e.target.value}))} style={{...IS,background:"#fff"}}>
@@ -273,24 +277,24 @@ export default function TrainerDashboard() {
                     </div>
                     <div style={{marginBottom:16}}>
                       <label style={LS}>Description *</label>
-                      <textarea value={form.description} onChange={e=>setForm(p=>({...p,description:e.target.value}))} placeholder="Describe your course..."
+                      <textarea value={form.description} onChange={e=>setForm(p=>({...p,description:e.target.value}))} placeholder="Describe what students will learn..."
                         style={{...IS,minHeight:80,resize:"vertical",fontFamily:"inherit"}}/>
                     </div>
                     <div style={{display:"flex",gap:10}}>
-                      <button type="submit" disabled={formLoading} style={{background:"#0d9488",color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontSize:13,fontWeight:600,cursor:formLoading?"not-allowed":"pointer",opacity:formLoading?0.7:1}}>
-                        {formLoading?"Creating...":"Create Course"}
+                      <button type="submit" disabled={formBusy} style={{background:"#0d9488",color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontSize:13,fontWeight:600,cursor:formBusy?"not-allowed":"pointer",opacity:formBusy?0.7:1}}>
+                        {formBusy?"Creating...":"Create Course"}
                       </button>
-                      <button type="button" onClick={()=>{setShowForm(false);setForm(EMPTY_FORM);setFormError("");}}
+                      <button type="button" onClick={()=>{setShowForm(false);setForm(EMPTY);setFormErr("");}}
                         style={{background:"#f9fafb",color:"#6b7280",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancel</button>
                     </div>
                   </form>
                 </div>
               )}
               {loadingC?<Spinner/>:filtered.length===0?(
-                <EmptyState icon="📚" title={search?"No matches":"No courses yet"} desc={search?"Try different keyword":"Create your first course!"}/>
+                <Empty icon="📚" title={search?"No matches":"No courses yet"} desc={search?"Try different keyword":"Create your first course!"}/>
               ):(
                 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14}}>
-                  {filtered.map(c=><CourseCard key={c._id} course={c} onDelete={handleDelete} onStudents={handleViewStudents}/>)}
+                  {filtered.map(c=><CourseCard key={c._id} course={c} onDelete={handleDelete} onStudents={handleStudents}/>)}
                 </div>
               )}
             </div>
@@ -300,15 +304,12 @@ export default function TrainerDashboard() {
           {tab==="students"&&(
             <div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                <h2 style={{fontSize:18,fontWeight:700,color:"#111827",margin:0}}>Students {selectedCourse?`— ${selectedCourse.title}`:""}</h2>
-                {selectedCourse&&<button onClick={()=>handleViewStudents(selectedCourse)} style={{fontSize:12,color:"#0d9488",background:"transparent",border:"1px solid #0d9488",borderRadius:6,padding:"5px 12px",cursor:"pointer"}}>🔄 Refresh</button>}
+                <h2 style={{fontSize:18,fontWeight:700,color:"#111827",margin:0}}>Students {selected?`— ${selected.title}`:""}</h2>
+                {selected&&<button onClick={()=>handleStudents(selected)} style={{fontSize:12,color:"#0d9488",background:"transparent",border:"1px solid #0d9488",borderRadius:6,padding:"5px 12px",cursor:"pointer"}}>🔄 Refresh</button>}
               </div>
-              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>{selectedCourse?`${students.length} student(s)`:"Select a course to view students"}</p>
-              {!selectedCourse?(
-                <EmptyState icon="👥" title="No course selected" desc="Click 'Students' on any course!" action="Go to Courses" onAction={()=>setTab("courses")}/>
-              ):loadStudents?<Spinner/>:students.length===0?(
-                <EmptyState icon="👥" title="No students yet" desc="Share your course to get students!"/>
-              ):(
+              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>{selected?`${students.length} enrolled`:"Select a course to view students"}</p>
+              {!selected?<Empty icon="👥" title="No course selected" desc="Click 'Students' on any course card!" btn="Go to Courses" onBtn={()=>setTab("courses")}/>:
+               loadingS?<Spinner/>:students.length===0?<Empty icon="👥" title="No students yet" desc="Share your course!"/>:(
                 <div style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",overflow:"hidden"}}>
                   <table style={{width:"100%",borderCollapse:"collapse"}}>
                     <thead><tr style={{background:"#f9fafb"}}>{["#","Name","Email","Phone","Enrolled On"].map(h=><th key={h} style={{padding:"12px 16px",fontSize:12,fontWeight:600,color:"#6b7280",textAlign:"left",borderBottom:"1px solid #f3f4f6"}}>{h}</th>)}</tr></thead>
@@ -338,35 +339,31 @@ export default function TrainerDashboard() {
           {tab==="reviews"&&(
             <div>
               <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:4}}>⭐ Course Reviews</h2>
-              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>See what trainees are saying about your courses</p>
-              {loadingRev?<Spinner/>:reviews.length===0?(
-                <EmptyState icon="⭐" title="No reviews yet" desc="Reviews will appear here once trainees rate your courses!"/>
-              ):(
+              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>See what trainees think about your courses</p>
+              {loadingR?<Spinner/>:reviews.length===0?<Empty icon="⭐" title="No reviews yet" desc="Reviews appear after trainees rate your courses"/>:(
                 <div style={{display:"flex",flexDirection:"column",gap:16}}>
                   {reviews.map(({course,reviews:revs,avgRating})=>(
                     <div key={course._id} style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",padding:20}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                         <div>
                           <h3 style={{fontSize:14,fontWeight:700,color:"#111827",margin:0}}>{course.title}</h3>
                           <p style={{fontSize:12,color:"#9ca3af",margin:"2px 0 0"}}>{revs.length} review(s)</p>
                         </div>
                         <div style={{textAlign:"center"}}>
-                          <p style={{fontSize:24,fontWeight:800,color:"#f59e0b",margin:0}}>{avgRating||"—"}</p>
-                          <div style={{display:"flex",gap:2}}>{stars(Math.round(avgRating))}</div>
+                          <p style={{fontSize:26,fontWeight:800,color:"#f59e0b",margin:0}}>{avgRating||"—"}</p>
+                          <div style={{display:"flex"}}>{stars(Math.round(avgRating))}</div>
                         </div>
                       </div>
-                      {revs.length===0?(
-                        <p style={{fontSize:13,color:"#9ca3af",fontStyle:"italic"}}>No reviews yet for this course.</p>
-                      ):(
-                        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                      {revs.length===0?<p style={{fontSize:13,color:"#9ca3af",fontStyle:"italic"}}>No reviews yet.</p>:(
+                        <div style={{display:"flex",flexDirection:"column",gap:8}}>
                           {revs.map(r=>(
-                            <div key={r._id} style={{background:"#f9fafb",borderRadius:8,padding:"12px 14px"}}>
-                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                            <div key={r._id} style={{background:"#f9fafb",borderRadius:8,padding:"10px 14px"}}>
+                              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
                                 <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{r.user?.name||"Trainee"}</span>
-                                <div style={{display:"flex",gap:2}}>{stars(r.rating)}</div>
+                                <div style={{display:"flex"}}>{stars(r.rating)}</div>
                               </div>
-                              {r.comment&&<p style={{fontSize:13,color:"#374151",margin:0,fontStyle:"italic"}}>"{r.comment}"</p>}
-                              <p style={{fontSize:11,color:"#9ca3af",margin:"4px 0 0"}}>{new Date(r.createdAt).toLocaleDateString()}</p>
+                              {r.comment&&<p style={{fontSize:12,color:"#374151",margin:0,fontStyle:"italic"}}>"{r.comment}"</p>}
+                              <p style={{fontSize:10,color:"#9ca3af",margin:"4px 0 0"}}>{new Date(r.createdAt).toLocaleDateString()}</p>
                             </div>
                           ))}
                         </div>
@@ -380,54 +377,62 @@ export default function TrainerDashboard() {
 
           {/* GO LIVE */}
           {tab==="live"&&(
-            <div style={{maxWidth:600}}>
+            <div style={{maxWidth:620}}>
               <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:4}}>🔴 Go Live</h2>
-              <p style={{fontSize:13,color:"#9ca3af",marginBottom:24}}>Start a session — meeting link is auto-generated, trainees notified instantly!</p>
-              {isLive&&currentSession?(
-                <div style={{background:"linear-gradient(135deg,#fef2f2,#fee2e2)",border:"2px solid #fca5a5",borderRadius:16,padding:28,textAlign:"center"}}>
+              <p style={{fontSize:13,color:"#9ca3af",marginBottom:24}}>Start a live session — meeting link auto-generated, trainees notified instantly via Socket.io!</p>
+              {isLive&&liveSession?(
+                <div style={{background:"linear-gradient(135deg,#fef2f2,#fee2e2)",border:"2px solid #fca5a5",borderRadius:16,padding:28,textAlign:"center",marginBottom:24}}>
                   <div style={{width:64,height:64,borderRadius:"50%",background:"#dc2626",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 16px"}}>🔴</div>
-                  <h3 style={{fontSize:20,fontWeight:800,color:"#dc2626",margin:"0 0 8px"}}>You Are Live!</h3>
-                  <p style={{fontSize:14,color:"#6b7280",margin:"0 0 8px"}}>{currentSession.title}</p>
-                  <p style={{fontSize:12,color:"#0d9488",margin:"0 0 20px",wordBreak:"break-all"}}>🔗 {currentSession.zoomLink}</p>
-                  <div style={{display:"flex",gap:12,justifyContent:"center"}}>
-                    <button onClick={()=>window.open(currentSession.zoomLink,"_blank","noopener,noreferrer")}
-                      style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:600,cursor:"pointer"}}>🎥 Open Zoom</button>
-                    <button onClick={handleEndLive}
-                      style={{background:"#dc2626",color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:600,cursor:"pointer"}}>⏹ End Session</button>
+                  <h3 style={{fontSize:20,fontWeight:800,color:"#dc2626",margin:"0 0 6px"}}>You Are Live!</h3>
+                  <p style={{fontSize:14,color:"#374151",margin:"0 0 8px",fontWeight:600}}>{liveSession.title}</p>
+                  <div style={{background:"#fff",borderRadius:8,padding:"8px 12px",marginBottom:16,wordBreak:"break-all"}}>
+                    <p style={{fontSize:11,color:"#6b7280",margin:"0 0 4px",fontWeight:600}}>Meeting Link (share with students):</p>
+                    <a href={liveSession.zoomLink} target="_blank" rel="noreferrer" style={{fontSize:12,color:"#0d9488",fontWeight:600}}>{liveSession.zoomLink}</a>
+                  </div>
+                  <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+                    <button onClick={()=>window.open(liveSession.zoomLink,"_blank","noopener,noreferrer")} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:600,cursor:"pointer"}}>🎥 Open Meeting</button>
+                    <button onClick={handleEndLive} style={{background:"#dc2626",color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:600,cursor:"pointer"}}>⏹ End Session</button>
                   </div>
                 </div>
               ):(
-                <div style={{background:"#fff",borderRadius:14,border:"1px solid #e5e7eb",padding:28}}>
-                  {liveError&&<div style={{background:"#fef2f2",color:"#dc2626",padding:"10px 14px",borderRadius:8,fontSize:13,marginBottom:16}}>⚠️ {liveError}</div>}
+                <div style={{background:"#fff",borderRadius:14,border:"1px solid #e5e7eb",padding:28,marginBottom:24}}>
+                  {liveErr&&<div style={{background:"#fef2f2",color:"#dc2626",padding:"10px 14px",borderRadius:8,fontSize:13,marginBottom:16}}>⚠️ {liveErr}</div>}
                   <form onSubmit={handleGoLive}>
-                    <FF label="Session Title *" value={liveForm.title} onChange={v=>setLiveForm(p=>({...p,title:v}))} placeholder="e.g. React Hooks Deep Dive"/>
+                    <F label="Session Title *" value={liveForm.title} onChange={v=>setLiveForm(p=>({...p,title:v}))} ph="e.g. React Hooks Deep Dive"/>
                     <div style={{marginTop:14}}>
-                      <label style={LS}>Course (Optional — notifies enrolled trainees only)</label>
+                      <label style={LS}>Course (Optional — notifies only enrolled trainees)</label>
                       <select value={liveForm.courseId} onChange={e=>setLiveForm(p=>({...p,courseId:e.target.value}))} style={{...IS,background:"#fff"}}>
-                        <option value="">— Notify ALL trainees —</option>
+                        <option value="">— Notify ALL trainees on platform —</option>
                         {courses.map(c=><option key={c._id} value={c._id}>{c.title}</option>)}
                       </select>
                     </div>
-                    <p style={{fontSize:11,color:"#9ca3af",margin:"10px 0 16px"}}>✅ Meeting link will be auto-generated using Jitsi Meet (free, no account needed)</p>
-                    <button type="submit" disabled={liveLoading}
-                      style={{width:"100%",background:liveLoading?"#fca5a5":"#dc2626",color:"#fff",border:"none",borderRadius:10,padding:"12px",fontSize:15,fontWeight:700,cursor:liveLoading?"not-allowed":"pointer"}}>
-                      {liveLoading?"Starting...":"🔴 Go Live Now"}
+                    <div style={{marginTop:14}}>
+                      <label style={LS}>Custom Meeting Link (optional — leave blank for auto-generated Jitsi link)</label>
+                      <input type="text" value={liveForm.customLink} onChange={e=>setLiveForm(p=>({...p,customLink:e.target.value}))} placeholder="https://zoom.us/j/your-id  OR  leave blank"
+                        style={IS}/>
+                    </div>
+                    <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px",margin:"16px 0",fontSize:12,color:"#0f766e"}}>
+                      ✅ Auto-generates a free Jitsi Meet link if left blank — no account or payment needed
+                    </div>
+                    <button type="submit" disabled={liveBusy} style={{width:"100%",background:liveBusy?"#fca5a5":"#dc2626",color:"#fff",border:"none",borderRadius:10,padding:"12px",fontSize:15,fontWeight:700,cursor:liveBusy?"not-allowed":"pointer"}}>
+                      {liveBusy?"Starting...":"🔴 Go Live Now — Notify Trainees"}
                     </button>
                   </form>
                 </div>
               )}
               {pastSessions.length>0&&(
-                <div style={{marginTop:24}}>
+                <div>
                   <h3 style={{fontSize:14,fontWeight:700,color:"#111827",marginBottom:10}}>Past Sessions</h3>
                   {pastSessions.map(s=>(
                     <div key={s._id} style={{background:"#fff",borderRadius:10,border:"1px solid #f3f4f6",padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                       <div>
                         <p style={{fontSize:13,fontWeight:600,color:"#111827",margin:0}}>{s.title}</p>
-                        <p style={{fontSize:11,color:"#9ca3af",margin:"2px 0 0"}}>{new Date(s.createdAt).toLocaleString()}</p>
+                        <p style={{fontSize:11,color:"#9ca3af",margin:"2px 0 0"}}>{new Date(s.createdAt).toLocaleString()} {s.course?.title?`· ${s.course.title}`:""}</p>
                       </div>
-                      <span style={{fontSize:11,padding:"2px 8px",borderRadius:999,fontWeight:600,background:s.isLive?"#fef2f2":"#f3f4f6",color:s.isLive?"#dc2626":"#6b7280"}}>
-                        {s.isLive?"🔴 Live":"⏹ Ended"}
-                      </span>
+                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                        <span style={{fontSize:11,padding:"2px 8px",borderRadius:999,fontWeight:600,background:s.isLive?"#fef2f2":"#f3f4f6",color:s.isLive?"#dc2626":"#6b7280"}}>{s.isLive?"🔴 Live":"⏹ Ended"}</span>
+                        <button onClick={()=>window.open(s.zoomLink,"_blank","noopener,noreferrer")} style={{background:"none",border:"none",color:"#2563eb",fontSize:12,cursor:"pointer",fontWeight:600}}>Open ↗</button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -438,18 +443,15 @@ export default function TrainerDashboard() {
           {/* SESSIONS */}
           {tab==="sessions"&&(
             <div>
-              <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:20}}>Zoom Sessions</h2>
-              {loadingC?<Spinner/>:courses.filter(c=>c.zoomLink).length===0?(
-                <EmptyState icon="🎥" title="No sessions" desc="Add a Zoom link when creating a course!"/>
-              ):(
+              <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:20}}>Course Sessions</h2>
+              {loadingC?<Spinner/>:courses.filter(c=>c.zoomLink).length===0?<Empty icon="🎥" title="No sessions" desc="Add a meeting link when creating a course!"/>:(
                 courses.filter(c=>c.zoomLink).map(c=>(
                   <div key={c._id} style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",padding:16,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                     <div>
                       <h4 style={{fontSize:14,fontWeight:600,color:"#111827",margin:0}}>{c.title}</h4>
-                      <p style={{fontSize:12,color:"#9ca3af",marginTop:4}}>{c.category} · {c.level}</p>
+                      <p style={{fontSize:12,color:"#9ca3af",marginTop:4}}>{c.category} · {c.level} {c.duration?`· ${c.duration}`:""}</p>
                     </div>
-                    <button onClick={()=>window.open(c.zoomLink,"_blank","noopener,noreferrer")}
-                      style={{background:"#2563eb",color:"#fff",border:"none",fontSize:12,fontWeight:600,padding:"8px 18px",borderRadius:8,cursor:"pointer"}}>🎥 Start</button>
+                    <button onClick={()=>window.open(c.zoomLink,"_blank","noopener,noreferrer")} style={{background:"#2563eb",color:"#fff",border:"none",fontSize:12,fontWeight:600,padding:"8px 18px",borderRadius:8,cursor:"pointer"}}>🎥 Start</button>
                   </div>
                 ))
               )}
@@ -474,20 +476,20 @@ export default function TrainerDashboard() {
                   <p style={{fontWeight:700,color:"#111827",fontSize:16,margin:0}}>{user?.name}</p>
                   <span style={{fontSize:11,padding:"2px 10px",borderRadius:999,background:"#dbeafe",color:"#1d4ed8",fontWeight:600}}>Trainer</span>
                 </div>
-                {profileError&&<div style={{background:"#fef2f2",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>⚠️ {profileError}</div>}
-                <form onSubmit={handleProfileSave}>
+                {profErr&&<div style={{background:"#fef2f2",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>⚠️ {profErr}</div>}
+                <form onSubmit={handleProfile}>
                   <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                    <FF label="Full Name"  value={profileForm.name}      onChange={v=>setProfileForm(p=>({...p,name:v}))}      placeholder="Your full name"/>
+                    <F label="Full Name"  value={profile.name}      onChange={v=>setProfile(p=>({...p,name:v}))}      ph="Your full name"/>
                     <div><label style={LS}>Email</label><input value={user?.email||""} disabled style={{...IS,color:"#9ca3af",background:"#f9fafb"}}/></div>
-                    <FF label="Phone"      value={profileForm.phone}     onChange={v=>setProfileForm(p=>({...p,phone:v}))}     placeholder="+91 9876543210"/>
-                    <FF label="Expertise (comma separated)" value={profileForm.expertise} onChange={v=>setProfileForm(p=>({...p,expertise:v}))} placeholder="React, Node.js"/>
+                    <F label="Phone"      value={profile.phone}     onChange={v=>setProfile(p=>({...p,phone:v}))}     ph="+91 9876543210"/>
+                    <F label="Expertise (comma separated)" value={profile.expertise} onChange={v=>setProfile(p=>({...p,expertise:v}))} ph="React, Node.js, Python"/>
                     <div>
                       <label style={LS}>Bio</label>
-                      <textarea value={profileForm.bio} onChange={e=>setProfileForm(p=>({...p,bio:e.target.value}))} placeholder="Tell students about yourself..."
+                      <textarea value={profile.bio} onChange={e=>setProfile(p=>({...p,bio:e.target.value}))} placeholder="Tell students about your experience..."
                         style={{...IS,minHeight:80,resize:"vertical",fontFamily:"inherit"}}/>
                     </div>
-                    <button type="submit" disabled={profileLoading} style={{background:"#0d9488",color:"#fff",border:"none",borderRadius:8,padding:"11px 0",fontSize:14,fontWeight:600,cursor:profileLoading?"not-allowed":"pointer",opacity:profileLoading?0.7:1}}>
-                      {profileLoading?"Saving...":"Save Profile ✅"}
+                    <button type="submit" disabled={profBusy} style={{background:"#0d9488",color:"#fff",border:"none",borderRadius:8,padding:"11px 0",fontSize:14,fontWeight:600,cursor:profBusy?"not-allowed":"pointer",opacity:profBusy?0.7:1}}>
+                      {profBusy?"Saving...":"Save Profile ✅"}
                     </button>
                   </div>
                 </form>
@@ -523,22 +525,22 @@ function CourseCard({ course, onDelete, onStudents }) {
   );
 }
 
-function FF({ label, value, onChange, placeholder, type="text" }) {
-  return (
-    <div>
-      <label style={LS}>{label}</label>
-      <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={IS}/>
-    </div>
-  );
-}
-
-function EmptyState({ icon, title, desc, action, onAction }) {
+function Empty({ icon, title, desc, btn, onBtn }) {
   return (
     <div style={{textAlign:"center",padding:48,background:"#fff",borderRadius:12,border:"1px dashed #e5e7eb"}}>
       <p style={{fontSize:40,marginBottom:12}}>{icon}</p>
       <p style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:6}}>{title}</p>
-      <p style={{fontSize:13,color:"#9ca3af",marginBottom:action?16:0}}>{desc}</p>
-      {action&&<button onClick={onAction} style={{background:"#0d9488",color:"#fff",border:"none",padding:"8px 20px",borderRadius:8,fontWeight:600,fontSize:12,cursor:"pointer"}}>{action}</button>}
+      <p style={{fontSize:13,color:"#9ca3af",marginBottom:btn?16:0}}>{desc}</p>
+      {btn&&<button onClick={onBtn} style={{background:"#0d9488",color:"#fff",border:"none",padding:"8px 20px",borderRadius:8,fontWeight:600,fontSize:12,cursor:"pointer"}}>{btn}</button>}
+    </div>
+  );
+}
+
+function F({ label, value, onChange, ph, type="text" }) {
+  return (
+    <div>
+      <label style={LS}>{label}</label>
+      <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={ph} style={IS}/>
     </div>
   );
 }

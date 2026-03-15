@@ -4,6 +4,7 @@ import Chat from "../components/Chat";
 import NotificationBell from "../components/NotificationBell";
 import Spinner from "../components/Spinner";
 import { useAuth } from "../context/AuthContext";
+import { useSocket } from "../context/SocketContext";
 import { getGreeting } from "../utils/helpers";
 import {
   getMyEnrollmentsAPI, getRecommendationsAPI, getAllCoursesAPI,
@@ -21,47 +22,37 @@ const NAV = [
   { id:"live",            label:"Live Sessions",  icon:"🔴" },
   { id:"sessions",        label:"Sessions",       icon:"📅" },
   { id:"chat",            label:"Messages",       icon:"💬" },
-  { id:"feedback",        label:"My Reviews",     icon:"⭐" },
+  { id:"feedback",        label:"Reviews",        icon:"⭐" },
   { id:"profile",         label:"Profile",        icon:"👤" },
 ];
 
 export default function TraineeDashboard() {
-  const [tab,            setTab]            = useState("dashboard");
-  const [search,         setSearch]         = useState("");
-  const [cat,            setCat]            = useState("All");
-  const [enrollments,    setEnrollments]    = useState([]);
-  const [recommended,    setRecommended]    = useState([]);
-  const [allCourses,     setAllCourses]     = useState([]);
-  const [activeSessions, setActiveSessions] = useState([]);
-  const [loadingE,       setLoadingE]       = useState(true);
-  const [loadingR,       setLoadingR]       = useState(true);
-  const [loadingC,       setLoadingC]       = useState(true);
-  const [toast,          setToast]          = useState(null);
-  const [enrollingId,    setEnrollingId]    = useState(null);
-  const [profileForm,    setProfileForm]    = useState({ name:"", phone:"", bio:"", skills:"" });
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [profileError,   setProfileError]   = useState("");
-  // Review state
-  const [reviewCourse,   setReviewCourse]   = useState(null);
-  const [reviewForm,     setReviewForm]     = useState({ rating:5, comment:"" });
-  const [reviewLoading,  setReviewLoading]  = useState(false);
-  const [myReviews,      setMyReviews]      = useState([]);
+  const [tab,         setTab]         = useState("dashboard");
+  const [search,      setSearch]      = useState("");
+  const [cat,         setCat]         = useState("All");
+  const [enrollments, setEnrollments] = useState([]);
+  const [recommended, setRecommended] = useState([]);
+  const [allCourses,  setAllCourses]  = useState([]);
+  const [activeSess,  setActiveSess]  = useState([]);
+  const [loadingE,    setLoadingE]    = useState(true);
+  const [loadingR,    setLoadingR]    = useState(true);
+  const [loadingC,    setLoadingC]    = useState(true);
+  const [enrollingId, setEnrollingId] = useState(null);
+  const [toast,       setToast]       = useState(null);
+  const [profile,     setProfile]     = useState({ name:"", phone:"", bio:"", skills:"" });
+  const [profBusy,    setProfBusy]    = useState(false);
+  const [profErr,     setProfErr]     = useState("");
+  const [reviewCourse,setReviewCourse]= useState(null);
+  const [reviewForm,  setReviewForm]  = useState({ rating:5, comment:"" });
+  const [reviewBusy,  setReviewBusy]  = useState(false);
+  const [myReviews,   setMyReviews]   = useState([]);
+  const { user }   = useAuth();
+  const { socket } = useSocket() || {};
 
-  const { user } = useAuth();
+  useEffect(() => { document.title = `${NAV.find(n=>n.id===tab)?.label||"Dashboard"} — OpenGig`; }, [tab]);
+  useEffect(() => { if(user) setProfile({ name:user.name||"", phone:user.phone||"", bio:user.bio||"", skills:Array.isArray(user.skills)?user.skills.join(", "):"" }); }, [user]);
 
-  useEffect(() => {
-    document.title = `${NAV.find(n=>n.id===tab)?.label||"Dashboard"} — OpenGig`;
-    return () => { document.title = "OpenGig"; };
-  }, [tab]);
-
-  useEffect(() => {
-    if (user) setProfileForm({
-      name:   user.name  || "",
-      phone:  user.phone || "",
-      bio:    user.bio   || "",
-      skills: Array.isArray(user.skills) ? user.skills.join(", ") : "",
-    });
-  }, [user]);
+  const showToast = (msg, type="success") => { setToast({msg,type}); setTimeout(()=>setToast(null),3000); };
 
   const fetchE = useCallback(async () => {
     setLoadingE(true);
@@ -71,11 +62,8 @@ export default function TraineeDashboard() {
 
   const fetchR = useCallback(async () => {
     setLoadingR(true);
-    try {
-      const r = await getRecommendationsAPI();
-      const d = r.data;
-      setRecommended(Array.isArray(d)?d:Array.isArray(d?.recommendations)?d.recommendations:[]);
-    } catch {} finally { setLoadingR(false); }
+    try { const r = await getRecommendationsAPI(); const d=r.data; setRecommended(Array.isArray(d)?d:Array.isArray(d?.recommendations)?d.recommendations:[]); }
+    catch {} finally { setLoadingR(false); }
   }, []);
 
   const fetchC = useCallback(async () => {
@@ -85,7 +73,7 @@ export default function TraineeDashboard() {
   }, []);
 
   const fetchSessions = useCallback(async () => {
-    try { const r = await getActiveSessionsAPI(); setActiveSessions(Array.isArray(r.data)?r.data:[]); }
+    try { const r = await getActiveSessionsAPI(); setActiveSess(Array.isArray(r.data)?r.data:[]); }
     catch {}
   }, []);
 
@@ -95,87 +83,92 @@ export default function TraineeDashboard() {
     return () => clearInterval(t);
   }, [fetchE, fetchR, fetchC, fetchSessions]);
 
-  const toast_ = (msg, type="success") => { setToast({msg,type}); setTimeout(()=>setToast(null),3000); };
+  // Real-time: listen for new live sessions
+  useEffect(() => {
+    if (!socket) return;
+    const h = (notif) => {
+      if (notif.type === "live_session") {
+        fetchSessions();
+        showToast(`🔴 ${notif.title} — Click Live Sessions to join!`);
+      }
+    };
+    socket.on("notification:new", h);
+    return () => socket.off("notification:new", h);
+  }, [socket, fetchSessions]);
 
-  const handleEnroll = async (courseId) => {
-    if (enrollingId) return;
-    setEnrollingId(courseId);
-    try {
-      const r = await enrollCourseAPI(courseId);
-      const msg = r.data?.message||"";
-      if (msg.toLowerCase().includes("already")) toast_("Already enrolled!","warning");
-      else { toast_("Enrolled! 🎉"); fetchE(); }
-    } catch(e) { toast_(e?.response?.data?.message||"Failed.","error"); }
-    finally { setEnrollingId(null); }
-  };
-
-  const isEnrolled = (id) => enrollments.some(e => (e.course?._id||e.course||e._id)?.toString()===id?.toString());
+  const isEnrolled = id => enrollments.some(e=>(e.course?._id||e.course||e._id)?.toString()===id?.toString());
   const enrolledList = enrollments.map(e=>e.course||e).filter(Boolean);
 
   const filtered = allCourses.filter(c => {
     const q = search.toLowerCase();
-    return (!q || c.title?.toLowerCase().includes(q) || c.description?.toLowerCase().includes(q)) &&
-           (cat==="All" || c.category?.toLowerCase().includes(cat.toLowerCase()));
+    return (!q||c.title?.toLowerCase().includes(q)||c.description?.toLowerCase().includes(q)) &&
+           (cat==="All"||c.category?.toLowerCase().includes(cat.toLowerCase()));
   });
 
-  const handleProfileSave = async (e) => {
-    e.preventDefault(); setProfileError(""); setProfileLoading(true);
+  const handleEnroll = async id => {
+    if (enrollingId) return;
+    setEnrollingId(id);
     try {
-      const p = { name:profileForm.name, phone:profileForm.phone, bio:profileForm.bio, skills:profileForm.skills.split(",").map(s=>s.trim()).filter(Boolean) };
+      const r = await enrollCourseAPI(id);
+      if (r.data?.message?.toLowerCase().includes("already")) showToast("Already enrolled!","warning");
+      else { showToast("Enrolled! 🎉"); fetchE(); fetchR(); }
+    } catch(e) { showToast(e?.response?.data?.message||"Failed.","error"); }
+    finally { setEnrollingId(null); }
+  };
+
+  const handleProfile = async e => {
+    e.preventDefault(); setProfErr(""); setProfBusy(true);
+    try {
+      const p = { name:profile.name, phone:profile.phone, bio:profile.bio, skills:profile.skills.split(",").map(s=>s.trim()).filter(Boolean) };
       await updateProfileAPI(p);
       localStorage.setItem("opengig_user", JSON.stringify({...user,...p}));
-      toast_("Profile updated! ✅");
-    } catch(e) { setProfileError(e?.response?.data?.message||"Failed."); }
-    finally { setProfileLoading(false); }
+      showToast("Profile saved! ✅");
+    } catch(e) { setProfErr(e?.response?.data?.message||"Failed."); }
+    finally { setProfBusy(false); }
   };
 
-  const handleSubmitReview = async (courseId) => {
-    setReviewLoading(true);
+  const handleReview = async courseId => {
+    setReviewBusy(true);
     try {
       await addReviewAPI({ courseId, rating:reviewForm.rating, comment:reviewForm.comment });
-      toast_("Review submitted! ⭐");
-      setReviewCourse(null);
-      setReviewForm({rating:5,comment:""});
-      // Refresh my reviews
-      const r = await Promise.all(enrolledList.map(c => getCourseReviewsAPI(c._id).catch(()=>({data:{reviews:[]}}))));
-      const all = r.flatMap(res => res.data?.reviews||[]).filter(rv => rv.user?._id===user?._id||rv.user===user?._id);
-      setMyReviews(all);
-    } catch(e) { toast_(e?.response?.data?.message||"Failed.","error"); }
-    finally { setReviewLoading(false); }
+      showToast("Review submitted! ⭐");
+      setReviewCourse(null); setReviewForm({rating:5,comment:""});
+      // refresh my reviews
+      const results = await Promise.all(enrolledList.map(c=>getCourseReviewsAPI(c._id).catch(()=>({data:{reviews:[]}}))));
+      setMyReviews(results.flatMap(r=>r.data?.reviews||[]).filter(rv=>(rv.user?._id||rv.user)?.toString()===user?._id?.toString()));
+    } catch(e) { showToast(e?.response?.data?.message||"Failed.","error"); }
+    finally { setReviewBusy(false); }
   };
 
-  // Load my reviews when feedback tab opens
   useEffect(() => {
-    if (tab==="feedback" && enrolledList.length>0) {
-      Promise.all(enrolledList.map(c => getCourseReviewsAPI(c._id).catch(()=>({data:{reviews:[]}}))))
-        .then(results => {
-          const all = results.flatMap(r=>r.data?.reviews||[]).filter(rv => (rv.user?._id||rv.user)?.toString()===user?._id?.toString());
-          setMyReviews(all);
-        });
-    }
+    if (tab!=="feedback"||enrolledList.length===0) return;
+    Promise.all(enrolledList.map(c=>getCourseReviewsAPI(c._id).catch(()=>({data:{reviews:[]}}))))
+      .then(r=>setMyReviews(r.flatMap(x=>x.data?.reviews||[]).filter(rv=>(rv.user?._id||rv.user)?.toString()===user?._id?.toString())));
   }, [tab, enrolledList.length]);
 
-  const stars = (n, interactive=false, onSet=null) => (
-    <div style={{display:"flex",gap:3}}>
+  const stars = (n, interactive=false, onSet) => (
+    <div style={{display:"flex",gap:2}}>
       {[1,2,3,4,5].map(i=>(
         <span key={i} onClick={()=>interactive&&onSet&&onSet(i)}
-          style={{fontSize:interactive?22:16,cursor:interactive?"pointer":"default",color:i<=n?"#f59e0b":"#d1d5db"}}>★</span>
+          style={{fontSize:interactive?24:14,cursor:interactive?"pointer":"default",color:i<=n?"#f59e0b":"#e5e7eb"}}>★</span>
       ))}
     </div>
   );
 
+  const liveCount = activeSess.length;
+  const navWithBadge = NAV.map(n => n.id==="live"&&liveCount>0 ? {...n,badge:liveCount} : n);
+
   return (
     <div style={{display:"flex",minHeight:"100vh",background:"#f9fafb",fontFamily:"ui-sans-serif,system-ui,sans-serif"}}>
-      <Sidebar activeTab={tab} setActiveTab={setTab} navItems={NAV} role="trainee" />
+      <Sidebar activeTab={tab} setActiveTab={setTab} navItems={navWithBadge} role="trainee"/>
 
-      <main style={{marginLeft:220,flex:1,display:"flex",flexDirection:"column",minHeight:"100vh"}}>
-        {/* Topbar */}
+      <main style={{marginLeft:220,flex:1,display:"flex",flexDirection:"column"}}>
         <header style={{background:"#fff",borderBottom:"1px solid #f3f4f6",padding:"12px 28px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:30}}>
           <div>
             <h2 style={{fontSize:16,fontWeight:700,color:"#111827",margin:0}}>{getGreeting()}, {user?.name?.split(" ")[0]} 👋</h2>
             <p style={{fontSize:11,color:"#9ca3af",marginTop:2}}>
               Trainee Dashboard
-              {activeSessions.length>0&&<span onClick={()=>setTab("live")} style={{marginLeft:8,background:"#fef2f2",color:"#dc2626",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:999,cursor:"pointer"}}>🔴 {activeSessions.length} Live</span>}
+              {liveCount>0&&<span onClick={()=>setTab("live")} style={{marginLeft:8,background:"#fef2f2",color:"#dc2626",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:999,cursor:"pointer"}}>🔴 {liveCount} Live Now</span>}
             </p>
           </div>
           <div style={{display:"flex",gap:10,alignItems:"center"}}>
@@ -185,11 +178,10 @@ export default function TraineeDashboard() {
                 onChange={e=>{setSearch(e.target.value);setTab("courses");}}
                 style={{paddingLeft:30,paddingRight:12,paddingTop:7,paddingBottom:7,fontSize:12,border:"1px solid #e5e7eb",borderRadius:8,width:200,background:"#f9fafb",color:"#111827",outline:"none"}}/>
             </div>
-            <NotificationBell />
+            <NotificationBell/>
           </div>
         </header>
 
-        {/* Toast */}
         {toast&&<div style={{position:"fixed",bottom:"2rem",right:"2rem",zIndex:9999,padding:"0.75rem 1.5rem",borderRadius:10,fontWeight:600,fontSize:14,background:toast.type==="error"?"#fef2f2":toast.type==="warning"?"#fffbeb":"#f0fdf4",color:toast.type==="error"?"#dc2626":toast.type==="warning"?"#d97706":"#16a34a",border:`1px solid ${toast.type==="error"?"#fca5a5":toast.type==="warning"?"#fcd34d":"#86efac"}`,boxShadow:"0 4px 20px rgba(0,0,0,0.1)"}}>{toast.msg}</div>}
 
         <div style={{padding:"24px 28px",flex:1}}>
@@ -197,20 +189,18 @@ export default function TraineeDashboard() {
           {/* DASHBOARD */}
           {tab==="dashboard"&&(
             <div style={{display:"flex",flexDirection:"column",gap:24}}>
-              {activeSessions.length>0&&(
+              {liveCount>0&&(
                 <div style={{background:"linear-gradient(135deg,#fef2f2,#fee2e2)",border:"2px solid #fca5a5",borderRadius:12,padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div>
                     <p style={{margin:0,fontWeight:700,color:"#dc2626",fontSize:14}}>🔴 Live Session in Progress!</p>
-                    <p style={{margin:"4px 0 0",color:"#6b7280",fontSize:12}}>{activeSessions[0].trainer?.name} is live: "{activeSessions[0].title}"</p>
+                    <p style={{margin:"4px 0 0",color:"#6b7280",fontSize:12}}>{activeSess[0].trainer?.name} is live: "{activeSess[0].title}"</p>
                   </div>
-                  <a href={activeSessions[0].zoomLink} target="_blank" rel="noreferrer" onClick={e=>{e.preventDefault();window.open(activeSessions[0].zoomLink,"_blank","noopener,noreferrer");}}
-                    style={{background:"#dc2626",color:"#fff",fontSize:12,fontWeight:700,padding:"8px 18px",borderRadius:8,textDecoration:"none",cursor:"pointer"}}>
-                    Join Now →
-                  </a>
+                  <button onClick={()=>window.open(activeSess[0].zoomLink,"_blank","noopener,noreferrer")}
+                    style={{background:"#dc2626",color:"#fff",border:"none",fontSize:13,fontWeight:700,padding:"9px 20px",borderRadius:8,cursor:"pointer"}}>Join Now →</button>
                 </div>
               )}
               <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
-                {[["Enrolled",enrolledList.length,"📚","#0f766e"],["Completed",0,"✅","#7c3aed"],["Recommendations",recommended.length,"✨","#ea580c"],["Live Now",activeSessions.length,"🔴","#dc2626"]].map(([l,v,i,c])=>(
+                {[["Enrolled",enrolledList.length,"📚","#0f766e"],["Recommendations",recommended.length,"✨","#ea580c"],["Live Now",liveCount,"🔴","#dc2626"],["Reviews",myReviews.length,"⭐","#f59e0b"]].map(([l,v,i,c])=>(
                   <div key={l} style={{background:"#fff",borderRadius:12,padding:"16px 18px",border:"1px solid #f3f4f6",display:"flex",alignItems:"center",gap:12}}>
                     <span style={{fontSize:24}}>{i}</span>
                     <div><p style={{fontSize:22,fontWeight:800,color:c,margin:0}}>{v}</p><p style={{fontSize:12,color:"#6b7280",margin:0}}>{l}</p></div>
@@ -220,11 +210,9 @@ export default function TraineeDashboard() {
               <section>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <h3 style={{fontSize:15,fontWeight:700,color:"#111827",margin:0}}>Continue Learning</h3>
-                  <button onClick={()=>setTab("my-courses")} style={{fontSize:12,color:"#0d9488",background:"transparent",border:"none",cursor:"pointer",fontWeight:500}}>View all →</button>
+                  <button onClick={()=>setTab("my-courses")} style={{fontSize:12,color:"#0d9488",background:"transparent",border:"none",cursor:"pointer"}}>View all →</button>
                 </div>
-                {loadingE?<Spinner/>:enrolledList.length===0?(
-                  <EmptyState icon="📚" title="No courses yet" desc="Browse and enroll!" action="Browse Courses" onAction={()=>setTab("courses")}/>
-                ):(
+                {loadingE?<Spinner/>:enrolledList.length===0?<Empty icon="📚" title="No courses yet" desc="Browse and enroll!" btn="Browse" onBtn={()=>setTab("courses")}/>:(
                   <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
                     {enrolledList.slice(0,3).map(c=><EnrolledCard key={c._id} course={c} onReview={()=>{setReviewCourse(c);setTab("feedback");}}/>)}
                   </div>
@@ -233,14 +221,12 @@ export default function TraineeDashboard() {
               <section>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <div>
-                    <h3 style={{fontSize:15,fontWeight:700,color:"#111827",margin:0}}>Recommended for You</h3>
-                    <p style={{fontSize:11,color:"#9ca3af",marginTop:2}}>AI-powered suggestions</p>
+                    <h3 style={{fontSize:15,fontWeight:700,color:"#111827",margin:0}}>AI Recommendations</h3>
+                    <p style={{fontSize:11,color:"#9ca3af",marginTop:2}}>TF-IDF + Cosine Similarity</p>
                   </div>
-                  <button onClick={()=>setTab("recommendations")} style={{fontSize:12,color:"#0d9488",background:"transparent",border:"none",cursor:"pointer",fontWeight:500}}>See all →</button>
+                  <button onClick={()=>setTab("recommendations")} style={{fontSize:12,color:"#0d9488",background:"transparent",border:"none",cursor:"pointer"}}>See all →</button>
                 </div>
-                {loadingR?<Spinner/>:recommended.length===0?(
-                  <EmptyState icon="✨" title="No recommendations yet" desc="Enroll in courses to get AI suggestions!"/>
-                ):(
+                {loadingR?<Spinner/>:recommended.length===0?<Empty icon="✨" title="No recommendations yet" desc="Enroll in courses to get AI suggestions!"/>:(
                   <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
                     {recommended.slice(0,4).map(c=><CourseCard key={c._id} course={c} enrolled={isEnrolled(c._id)} enrolling={enrollingId===c._id} onEnroll={()=>handleEnroll(c._id)}/>)}
                   </div>
@@ -257,13 +243,9 @@ export default function TraineeDashboard() {
                 <span style={{fontSize:12,color:"#9ca3af"}}>{filtered.length} found</span>
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
-                {CATS.map(c=>(
-                  <button key={c} onClick={()=>setCat(c)} style={{fontSize:12,padding:"5px 14px",borderRadius:999,border:"1px solid #e5e7eb",cursor:"pointer",fontWeight:500,background:cat===c?"#0d9488":"#fff",color:cat===c?"#fff":"#374151"}}>{c}</button>
-                ))}
+                {CATS.map(c=><button key={c} onClick={()=>setCat(c)} style={{fontSize:12,padding:"5px 14px",borderRadius:999,border:"1px solid #e5e7eb",cursor:"pointer",fontWeight:500,background:cat===c?"#0d9488":"#fff",color:cat===c?"#fff":"#374151"}}>{c}</button>)}
               </div>
-              {loadingC?<Spinner/>:filtered.length===0?(
-                <EmptyState icon="🔍" title="No courses found" desc="Try different search or category" action="Clear" onAction={()=>{setSearch("");setCat("All");}}/>
-              ):(
+              {loadingC?<Spinner/>:filtered.length===0?<Empty icon="🔍" title="No courses found" desc="Try different search or category" btn="Clear" onBtn={()=>{setSearch("");setCat("All");}}/>:(
                 <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14}}>
                   {filtered.map(c=><CourseCard key={c._id} course={c} enrolled={isEnrolled(c._id)} enrolling={enrollingId===c._id} onEnroll={()=>handleEnroll(c._id)}/>)}
                 </div>
@@ -275,9 +257,7 @@ export default function TraineeDashboard() {
           {tab==="my-courses"&&(
             <div>
               <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:20}}>My Enrolled Courses</h2>
-              {loadingE?<Spinner/>:enrolledList.length===0?(
-                <EmptyState icon="🎯" title="No enrollments yet" desc="Go browse and enroll!" action="Browse Courses" onAction={()=>setTab("courses")}/>
-              ):(
+              {loadingE?<Spinner/>:enrolledList.length===0?<Empty icon="🎯" title="No enrollments" desc="Browse and enroll!" btn="Browse" onBtn={()=>setTab("courses")}/>:(
                 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
                   {enrolledList.map(c=><EnrolledCard key={c._id} course={c} onReview={()=>{setReviewCourse(c);setTab("feedback");}}/>)}
                 </div>
@@ -288,11 +268,9 @@ export default function TraineeDashboard() {
           {/* RECOMMENDATIONS */}
           {tab==="recommendations"&&(
             <div>
-              <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:4}}>Personalized Recommendations</h2>
-              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>AI-powered using TF-IDF + Cosine Similarity</p>
-              {loadingR?<Spinner/>:recommended.length===0?(
-                <EmptyState icon="✨" title="No recommendations yet" desc="Enroll in more courses to improve suggestions!"/>
-              ):(
+              <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:4}}>AI Recommendations</h2>
+              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>Personalised using TF-IDF + Cosine Similarity on your enrolled courses</p>
+              {loadingR?<Spinner/>:recommended.length===0?<Empty icon="✨" title="No recommendations yet" desc="Enroll in more courses to improve suggestions!"/>:(
                 <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14}}>
                   {recommended.map(c=><CourseCard key={c._id} course={c} enrolled={isEnrolled(c._id)} enrolling={enrollingId===c._id} onEnroll={()=>handleEnroll(c._id)}/>)}
                 </div>
@@ -300,16 +278,14 @@ export default function TraineeDashboard() {
             </div>
           )}
 
-          {/* LIVE */}
+          {/* LIVE SESSIONS */}
           {tab==="live"&&(
             <div>
               <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:4}}>🔴 Live Sessions</h2>
-              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>Join live sessions from your trainers in real time</p>
-              {activeSessions.length===0?(
-                <EmptyState icon="🔴" title="No live sessions right now" desc="You'll get a notification when a trainer goes live!"/>
-              ):(
+              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>Join live sessions from your trainers — links auto-generated with Jitsi Meet</p>
+              {activeSess.length===0?<Empty icon="🔴" title="No live sessions right now" desc="You will get a real-time notification when a trainer goes live!"/>:(
                 <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                  {activeSessions.map(s=>(
+                  {activeSess.map(s=>(
                     <div key={s._id} style={{background:"linear-gradient(135deg,#fef2f2,#fff)",border:"2px solid #fca5a5",borderRadius:14,padding:20,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <div>
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
@@ -318,9 +294,10 @@ export default function TraineeDashboard() {
                         </div>
                         <h4 style={{fontSize:15,fontWeight:700,color:"#111827",margin:"0 0 4px"}}>{s.title}</h4>
                         <p style={{fontSize:12,color:"#6b7280",margin:0}}>by {s.trainer?.name} {s.course?.title?`· ${s.course.title}`:""}</p>
+                        <p style={{fontSize:11,color:"#9ca3af",margin:"4px 0 0"}}>Meeting: <a href={s.zoomLink} target="_blank" rel="noreferrer" style={{color:"#0d9488"}}>{s.zoomLink?.slice(0,50)}...</a></p>
                       </div>
                       <button onClick={()=>window.open(s.zoomLink,"_blank","noopener,noreferrer")}
-                        style={{background:"#dc2626",color:"#fff",border:"none",fontSize:14,fontWeight:700,padding:"10px 24px",borderRadius:10,cursor:"pointer"}}>
+                        style={{background:"#dc2626",color:"#fff",border:"none",fontSize:14,fontWeight:700,padding:"11px 24px",borderRadius:10,cursor:"pointer",flexShrink:0}}>
                         Join Live →
                       </button>
                     </div>
@@ -334,23 +311,16 @@ export default function TraineeDashboard() {
           {tab==="sessions"&&(
             <div>
               <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:20}}>Upcoming Sessions</h2>
-              {loadingE?<Spinner/>:enrolledList.filter(c=>c?.zoomLink).length===0?(
-                <EmptyState icon="📅" title="No sessions" desc="Enroll in live courses to see sessions!" action="Browse Courses" onAction={()=>setTab("courses")}/>
-              ):(
-                <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                  {enrolledList.filter(c=>c?.zoomLink).map(c=>(
-                    <div key={c._id} style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",padding:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <div>
-                        <h4 style={{fontSize:14,fontWeight:600,color:"#111827",margin:0}}>{c.title}</h4>
-                        <p style={{fontSize:12,color:"#9ca3af",marginTop:4}}>by {c.trainer?.name||"Trainer"}</p>
-                      </div>
-                      <button onClick={()=>window.open(c.zoomLink,"_blank","noopener,noreferrer")}
-                        style={{background:"#2563eb",color:"#fff",border:"none",fontSize:12,fontWeight:600,padding:"8px 18px",borderRadius:8,cursor:"pointer"}}>
-                        Join Session
-                      </button>
+              {loadingE?<Spinner/>:enrolledList.filter(c=>c?.zoomLink).length===0?<Empty icon="📅" title="No sessions" desc="Enroll in courses with meeting links!" btn="Browse" onBtn={()=>setTab("courses")}/>:(
+                enrolledList.filter(c=>c?.zoomLink).map(c=>(
+                  <div key={c._id} style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",padding:16,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <div>
+                      <h4 style={{fontSize:14,fontWeight:600,color:"#111827",margin:0}}>{c.title}</h4>
+                      <p style={{fontSize:12,color:"#9ca3af",marginTop:4}}>by {c.trainer?.name||"Trainer"}</p>
                     </div>
-                  ))}
-                </div>
+                    <button onClick={()=>window.open(c.zoomLink,"_blank","noopener,noreferrer")} style={{background:"#2563eb",color:"#fff",border:"none",fontSize:12,fontWeight:600,padding:"8px 18px",borderRadius:8,cursor:"pointer"}}>Join</button>
+                  </div>
+                ))
               )}
             </div>
           )}
@@ -359,80 +329,58 @@ export default function TraineeDashboard() {
           {tab==="chat"&&(
             <div style={{height:"calc(100vh - 140px)"}}>
               <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:16}}>Messages</h2>
-              <div style={{height:"calc(100% - 50px)"}}>
-                <Chat/>
-              </div>
+              <div style={{height:"calc(100% - 50px)"}}><Chat/></div>
             </div>
           )}
 
-          {/* FEEDBACK / REVIEWS */}
+          {/* FEEDBACK/REVIEWS */}
           {tab==="feedback"&&(
             <div>
               <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:4}}>⭐ My Reviews</h2>
               <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>Rate and review courses you've enrolled in</p>
-
-              {/* Review Form */}
-              {reviewCourse && (
+              {reviewCourse&&(
                 <div style={{background:"#fff",borderRadius:12,border:"2px solid #0d9488",padding:24,marginBottom:24}}>
                   <h3 style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:4}}>Review: {reviewCourse.title}</h3>
-                  <p style={{fontSize:12,color:"#9ca3af",marginBottom:16}}>Share your feedback to help other learners</p>
+                  <p style={{fontSize:12,color:"#9ca3af",marginBottom:16}}>Your honest feedback helps other trainees</p>
                   <div style={{marginBottom:14}}>
                     <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:6}}>Your Rating</label>
-                    {stars(reviewForm.rating, true, (r)=>setReviewForm(p=>({...p,rating:r})))}
+                    {stars(reviewForm.rating,true,r=>setReviewForm(p=>({...p,rating:r})))}
                   </div>
                   <div style={{marginBottom:16}}>
                     <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:6}}>Comment (optional)</label>
-                    <textarea value={reviewForm.comment} onChange={e=>setReviewForm(p=>({...p,comment:e.target.value}))}
-                      placeholder="What did you like? What can be improved?"
+                    <textarea value={reviewForm.comment} onChange={e=>setReviewForm(p=>({...p,comment:e.target.value}))} placeholder="What did you like? What can improve?"
                       style={{width:"100%",padding:"10px 12px",fontSize:13,border:"1px solid #e5e7eb",borderRadius:8,resize:"vertical",minHeight:80,outline:"none",fontFamily:"inherit",boxSizing:"border-box"}}/>
                   </div>
                   <div style={{display:"flex",gap:10}}>
-                    <button onClick={()=>handleSubmitReview(reviewCourse._id)} disabled={reviewLoading}
-                      style={{background:"#0d9488",color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontSize:13,fontWeight:600,cursor:reviewLoading?"not-allowed":"pointer",opacity:reviewLoading?0.7:1}}>
-                      {reviewLoading?"Submitting...":"Submit Review ⭐"}
+                    <button onClick={()=>handleReview(reviewCourse._id)} disabled={reviewBusy} style={{background:"#0d9488",color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontSize:13,fontWeight:600,cursor:reviewBusy?"not-allowed":"pointer",opacity:reviewBusy?0.7:1}}>
+                      {reviewBusy?"Submitting...":"Submit Review ⭐"}
                     </button>
-                    <button onClick={()=>setReviewCourse(null)}
-                      style={{background:"#f9fafb",color:"#6b7280",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-                      Cancel
-                    </button>
+                    <button onClick={()=>setReviewCourse(null)} style={{background:"#f9fafb",color:"#6b7280",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancel</button>
                   </div>
                 </div>
               )}
-
-              {/* Enrolled courses to review */}
-              <div style={{marginBottom:24}}>
-                <h3 style={{fontSize:14,fontWeight:700,color:"#111827",marginBottom:12}}>Rate Your Courses</h3>
-                {enrolledList.length===0?(
-                  <EmptyState icon="⭐" title="No courses to review" desc="Enroll in courses first!" action="Browse Courses" onAction={()=>setTab("courses")}/>
-                ):(
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14}}>
-                    {enrolledList.map(c=>{
-                      const myRev = myReviews.find(r=>(r.course?._id||r.course)?.toString()===c._id?.toString());
-                      return (
-                        <div key={c._id} style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",padding:16}}>
-                          <h4 style={{fontSize:13,fontWeight:700,color:"#111827",margin:"0 0 8px",lineHeight:1.4}}>{c.title}</h4>
-                          <p style={{fontSize:11,color:"#9ca3af",margin:"0 0 12px"}}>by {c.trainer?.name||"Trainer"}</p>
-                          {myRev?(
-                            <div>
-                              {stars(myRev.rating)}
-                              {myRev.comment&&<p style={{fontSize:12,color:"#374151",marginTop:6,fontStyle:"italic"}}>"{myRev.comment}"</p>}
-                              <button onClick={()=>{setReviewCourse(c);setReviewForm({rating:myRev.rating,comment:myRev.comment||""});}}
-                                style={{marginTop:8,fontSize:11,color:"#0d9488",background:"transparent",border:"1px solid #0d9488",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontWeight:600}}>
-                                Edit Review
-                              </button>
-                            </div>
-                          ):(
-                            <button onClick={()=>{setReviewCourse(c);setReviewForm({rating:5,comment:""}); }}
-                              style={{background:"#f0fdf4",color:"#0f766e",border:"1px solid #bbf7d0",borderRadius:7,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",width:"100%"}}>
-                              ⭐ Write Review
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              {enrolledList.length===0?<Empty icon="⭐" title="No courses to review" desc="Enroll first!" btn="Browse" onBtn={()=>setTab("courses")}/>:(
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14}}>
+                  {enrolledList.map(c=>{
+                    const rv = myReviews.find(r=>(r.course?._id||r.course)?.toString()===c._id?.toString());
+                    return (
+                      <div key={c._id} style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",padding:16}}>
+                        <h4 style={{fontSize:13,fontWeight:700,color:"#111827",margin:"0 0 6px",lineHeight:1.4}}>{c.title}</h4>
+                        <p style={{fontSize:11,color:"#9ca3af",margin:"0 0 12px"}}>by {c.trainer?.name||"Trainer"}</p>
+                        {rv?(
+                          <div>
+                            {stars(rv.rating)}
+                            {rv.comment&&<p style={{fontSize:12,color:"#374151",marginTop:6,fontStyle:"italic"}}>"{rv.comment}"</p>}
+                            <button onClick={()=>{setReviewCourse(c);setReviewForm({rating:rv.rating,comment:rv.comment||""});}} style={{marginTop:8,fontSize:11,color:"#0d9488",background:"transparent",border:"1px solid #0d9488",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontWeight:600}}>Edit Review</button>
+                          </div>
+                        ):(
+                          <button onClick={()=>{setReviewCourse(c);setReviewForm({rating:5,comment:""}); }} style={{background:"#f0fdf4",color:"#0f766e",border:"1px solid #bbf7d0",borderRadius:7,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",width:"100%"}}>⭐ Write Review</button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -446,20 +394,20 @@ export default function TraineeDashboard() {
                   <p style={{fontWeight:700,color:"#111827",fontSize:16,margin:0}}>{user?.name}</p>
                   <span style={{fontSize:11,padding:"2px 10px",borderRadius:999,background:"#ccfbf1",color:"#0f766e",fontWeight:600}}>Trainee</span>
                 </div>
-                {profileError&&<div style={{background:"#fef2f2",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>⚠️ {profileError}</div>}
-                <form onSubmit={handleProfileSave}>
+                {profErr&&<div style={{background:"#fef2f2",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>⚠️ {profErr}</div>}
+                <form onSubmit={handleProfile}>
                   <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                    <Field label="Full Name"   value={profileForm.name}  onChange={v=>setProfileForm(p=>({...p,name:v}))}  placeholder="Your full name"/>
+                    <PF label="Full Name"  value={profile.name}  onChange={v=>setProfile(p=>({...p,name:v}))}  ph="Your full name"/>
                     <div><label style={LS}>Email</label><input value={user?.email||""} disabled style={{...IS,color:"#9ca3af",background:"#f9fafb"}}/></div>
-                    <Field label="Phone"       value={profileForm.phone} onChange={v=>setProfileForm(p=>({...p,phone:v}))} placeholder="+91 9876543210"/>
-                    <Field label="Skills (comma separated)" value={profileForm.skills} onChange={v=>setProfileForm(p=>({...p,skills:v}))} placeholder="React, Python, UI/UX"/>
+                    <PF label="Phone"      value={profile.phone} onChange={v=>setProfile(p=>({...p,phone:v}))} ph="+91 9876543210"/>
+                    <PF label="Skills (comma separated)" value={profile.skills} onChange={v=>setProfile(p=>({...p,skills:v}))} ph="React, Python, UI/UX"/>
                     <div>
                       <label style={LS}>Bio</label>
-                      <textarea value={profileForm.bio} onChange={e=>setProfileForm(p=>({...p,bio:e.target.value}))} placeholder="Tell trainers about yourself..."
+                      <textarea value={profile.bio} onChange={e=>setProfile(p=>({...p,bio:e.target.value}))} placeholder="Tell trainers about yourself..."
                         style={{...IS,minHeight:80,resize:"vertical",fontFamily:"inherit"}}/>
                     </div>
-                    <button type="submit" disabled={profileLoading} style={{background:"#0d9488",color:"#fff",border:"none",borderRadius:8,padding:"11px 0",fontSize:14,fontWeight:600,cursor:profileLoading?"not-allowed":"pointer",opacity:profileLoading?0.7:1}}>
-                      {profileLoading?"Saving...":"Save Profile ✅"}
+                    <button type="submit" disabled={profBusy} style={{background:"#0d9488",color:"#fff",border:"none",borderRadius:8,padding:"11px 0",fontSize:14,fontWeight:600,cursor:profBusy?"not-allowed":"pointer",opacity:profBusy?0.7:1}}>
+                      {profBusy?"Saving...":"Save Profile ✅"}
                     </button>
                   </div>
                 </form>
@@ -477,7 +425,7 @@ function EnrolledCard({ course, onReview }) {
     <div style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",overflow:"hidden"}}>
       <div style={{height:70,background:"linear-gradient(135deg,#0d9488,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:28}}>📚</span></div>
       <div style={{padding:14}}>
-        <h4 style={{fontSize:13,fontWeight:700,color:"#111827",margin:"0 0 6px",lineHeight:1.4}}>{course.title}</h4>
+        <h4 style={{fontSize:13,fontWeight:700,color:"#111827",margin:"0 0 4px",lineHeight:1.4}}>{course.title}</h4>
         <p style={{fontSize:11,color:"#9ca3af",margin:"0 0 10px"}}>by {course.trainer?.name||"Trainer"}</p>
         <div style={{display:"flex",gap:6}}>
           <span style={{fontSize:11,padding:"2px 8px",borderRadius:999,background:"#f0fdf4",color:"#16a34a",fontWeight:600}}>✅ Enrolled</span>
@@ -495,14 +443,16 @@ function CourseCard({ course, enrolled, enrolling, onEnroll }) {
       onMouseLeave={e=>e.currentTarget.style.boxShadow="none"}>
       <div style={{height:80,background:"linear-gradient(135deg,#0d9488,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:32}}>📚</span></div>
       <div style={{padding:14,flex:1,display:"flex",flexDirection:"column"}}>
-        <h4 style={{fontSize:13,fontWeight:700,color:"#111827",margin:"0 0 6px",lineHeight:1.4}}>{course.title}</h4>
-        <p style={{fontSize:11,color:"#9ca3af",marginBottom:8,flex:1}}>{course.description?.slice(0,70)}...</p>
+        <h4 style={{fontSize:13,fontWeight:700,color:"#111827",margin:"0 0 4px",lineHeight:1.4}}>{course.title}</h4>
+        <p style={{fontSize:11,color:"#9ca3af",marginBottom:8,flex:1}}>{course.description?.slice(0,65)}...</p>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
           <span style={{fontSize:11,color:"#0d9488",fontWeight:600}}>{course.level||"Beginner"}</span>
           <span style={{fontSize:12,fontWeight:700,color:"#111827"}}>{course.price===0||!course.price?"Free":`₹${course.price}`}</span>
         </div>
         <button onClick={onEnroll} disabled={enrolled||enrolling}
-          style={{width:"100%",padding:"8px",borderRadius:8,border:"none",cursor:enrolled||enrolling?"not-allowed":"pointer",fontWeight:600,fontSize:12,background:enrolled?"#f0fdf4":enrolling?"#e0e7ff":"#0d9488",color:enrolled?"#16a34a":enrolling?"#4338ca":"#fff"}}>
+          style={{width:"100%",padding:"8px",borderRadius:8,border:"none",cursor:enrolled||enrolling?"not-allowed":"pointer",fontWeight:600,fontSize:12,
+            background:enrolled?"#f0fdf4":enrolling?"#e0e7ff":"#0d9488",
+            color:enrolled?"#16a34a":enrolling?"#4338ca":"#fff"}}>
           {enrolled?"✅ Enrolled":enrolling?"Enrolling...":"Enroll Free"}
         </button>
       </div>
@@ -510,22 +460,22 @@ function CourseCard({ course, enrolled, enrolling, onEnroll }) {
   );
 }
 
-function Field({ label, value, onChange, placeholder }) {
-  return (
-    <div>
-      <label style={LS}>{label}</label>
-      <input type="text" value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={IS}/>
-    </div>
-  );
-}
-
-function EmptyState({ icon, title, desc, action, onAction }) {
+function Empty({ icon, title, desc, btn, onBtn }) {
   return (
     <div style={{textAlign:"center",padding:40,background:"#fff",borderRadius:12,border:"1px dashed #e5e7eb"}}>
       <p style={{fontSize:36,marginBottom:8}}>{icon}</p>
       <p style={{fontWeight:600,color:"#111827",marginBottom:4}}>{title}</p>
-      <p style={{fontSize:12,color:"#9ca3af",marginBottom:action?16:0}}>{desc}</p>
-      {action&&<button onClick={onAction} style={{background:"#0d9488",color:"#fff",border:"none",padding:"8px 20px",borderRadius:8,fontWeight:600,fontSize:12,cursor:"pointer"}}>{action}</button>}
+      <p style={{fontSize:12,color:"#9ca3af",marginBottom:btn?16:0}}>{desc}</p>
+      {btn&&<button onClick={onBtn} style={{background:"#0d9488",color:"#fff",border:"none",padding:"8px 20px",borderRadius:8,fontWeight:600,fontSize:12,cursor:"pointer"}}>{btn}</button>}
+    </div>
+  );
+}
+
+function PF({ label, value, onChange, ph }) {
+  return (
+    <div>
+      <label style={LS}>{label}</label>
+      <input type="text" value={value} onChange={e=>onChange(e.target.value)} placeholder={ph} style={IS}/>
     </div>
   );
 }
