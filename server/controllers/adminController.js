@@ -1,68 +1,87 @@
-const User = require("../models/User");
-const Course = require("../models/Course");
-const Enrollment = require("../models/Enrollment");
+const User        = require("../models/User");
+const Course      = require("../models/Course");
+const Enrollment  = require("../models/Enrollment");
+const LiveSession = require("../models/LiveSession");
 
-// GET /api/admin/stats
+// ── Platform Stats ────────────────────────────────────────────────────────────
 const getStats = async (req, res) => {
   try {
-    const totalUsers    = await User.countDocuments();
-    const totalCourses  = await Course.countDocuments();
+    const totalUsers       = await User.countDocuments();
+    const totalTrainers    = await User.countDocuments({ role: "trainer" });
+    const totalTrainees    = await User.countDocuments({ role: "trainee" });
+    const totalCourses     = await Course.countDocuments();
     const totalEnrollments = await Enrollment.countDocuments();
-    const trainers      = await User.countDocuments({ role: "trainer" });
-    const learners      = await User.countDocuments({ role: "learner" });
+    const blockedUsers     = await User.countDocuments({ isBlocked: true });
+    const activeSessions   = await LiveSession.countDocuments({ isLive: true });
+    const totalSessions    = await LiveSession.countDocuments();
 
-    res.json({ totalUsers, totalCourses, totalEnrollments, trainers, learners });
-  } catch (err) {
-    res.status(500).json({ message: "Failed to get stats", error: err.message });
-  }
+    res.status(200).json({
+      totalUsers, totalTrainers, totalTrainees,
+      totalCourses, totalEnrollments, blockedUsers,
+      activeSessions, totalSessions,
+    });
+  } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
-// GET /api/admin/users
+// ── Get All Users ─────────────────────────────────────────────────────────────
 const getAllUsers = async (req, res) => {
   try {
-    const users = await User.find().select("-password");
-    res.json(users);
-  } catch (err) {
-    res.status(500).json({ message: "Failed to fetch users", error: err.message });
-  }
+    const users = await User.find().select("-password").sort({ createdAt: -1 });
+    res.status(200).json(users);
+  } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
-// PUT /api/admin/users/:id/block
+// ── Block User ────────────────────────────────────────────────────────────────
 const blockUser = async (req, res) => {
   try {
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      { isBlocked: true },
-      { new: true }
-    ).select("-password");
-    res.json({ message: "User blocked", user });
-  } catch (err) {
-    res.status(500).json({ message: "Failed to block user", error: err.message });
-  }
+    const user = await User.findByIdAndUpdate(req.params.id, { isBlocked: true }, { new: true }).select("-password");
+    if (!user) return res.status(404).json({ message: "User not found." });
+    res.status(200).json({ message: `${user.name} has been blocked.`, user });
+  } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
-// PUT /api/admin/users/:id/unblock
+// ── Unblock User ──────────────────────────────────────────────────────────────
 const unblockUser = async (req, res) => {
   try {
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      { isBlocked: false },
-      { new: true }
-    ).select("-password");
-    res.json({ message: "User unblocked", user });
-  } catch (err) {
-    res.status(500).json({ message: "Failed to unblock user", error: err.message });
-  }
+    const user = await User.findByIdAndUpdate(req.params.id, { isBlocked: false }, { new: true }).select("-password");
+    if (!user) return res.status(404).json({ message: "User not found." });
+    res.status(200).json({ message: `${user.name} has been unblocked.`, user });
+  } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
-// DELETE /api/admin/courses/:id
+// ── Delete User ───────────────────────────────────────────────────────────────
+const deleteUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.role === "admin") return res.status(403).json({ message: "Cannot delete admin." });
+    await User.findByIdAndDelete(req.params.id);
+    res.status(200).json({ message: "User deleted." });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
+
+// ── Get All Courses (admin) ───────────────────────────────────────────────────
+const getAllCourses = async (req, res) => {
+  try {
+    const courses = await Course.find()
+      .populate("trainer", "name email")
+      .sort({ createdAt: -1 });
+    // Attach enrollment count
+    const withCounts = await Promise.all(courses.map(async (c) => {
+      const count = await Enrollment.countDocuments({ course: c._id });
+      return { ...c.toObject(), enrollmentCount: count };
+    }));
+    res.status(200).json(withCounts);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
+
+// ── Delete Course (admin) ─────────────────────────────────────────────────────
 const deleteCourse = async (req, res) => {
   try {
     await Course.findByIdAndDelete(req.params.id);
-    res.json({ message: "Course deleted by admin" });
-  } catch (err) {
-    res.status(500).json({ message: "Failed to delete course", error: err.message });
-  }
+    await Enrollment.deleteMany({ course: req.params.id });
+    res.status(200).json({ message: "Course deleted." });
+  } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
-module.exports = { getStats, getAllUsers, blockUser, unblockUser, deleteCourse };
+module.exports = { getStats, getAllUsers, blockUser, unblockUser, deleteUser, getAllCourses, deleteCourse };

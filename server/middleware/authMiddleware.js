@@ -1,29 +1,27 @@
 const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 
-const protect = (req, res, next) => {
-  const authHeader = req.headers.authorization;
+const protect = async (req, res, next) => {
+    let token = req.headers.authorization?.startsWith("Bearer") && req.headers.authorization.split(" ")[1];
+    if (!token) return res.status(401).json({ message: "Not authorized" });
 
-  if (!authHeader || !authHeader.startsWith("Bearer "))
-    return res.status(401).json({ message: "No token, access denied" });
-
-  try {
-    const token   = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "opengig_secret_key_2024");
-    req.user = decoded;
-    next();
-  } catch (err) {
-    return res.status(401).json({ message: "Token invalid or expired" });
-  }
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || "opengig_secret");
+        req.user = await User.findById(decoded.id).select("-password");
+        next();
+    } catch (error) {
+        res.status(401).json({ message: "Token failed" });
+    }
 };
 
 const adminOnly = (req, res, next) => {
-  if (req.user?.role === "admin") return next();
-  return res.status(403).json({ message: "Admin access only" });
+    if (req.user && req.user.role === "admin") next();
+    else res.status(403).json({ message: "Admin access only" });
 };
 
 const trainerOnly = (req, res, next) => {
-  if (req.user?.role === "trainer" || req.user?.role === "admin") return next();
-  return res.status(403).json({ message: "Trainer access only" });
+    if (req.user && req.user.role === "trainer") next();
+    else res.status(403).json({ message: "Trainer access only" });
 };
 
 module.exports = { protect, adminOnly, trainerOnly };

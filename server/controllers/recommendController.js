@@ -1,28 +1,72 @@
-const axios = require("axios");
-const Course = require("../models/Course");
+const axios      = require("axios");
+const Course     = require("../models/Course");
 const Enrollment = require("../models/Enrollment");
+const User       = require("../models/User");
 
-// GET /api/recommend
+const ML_URL = process.env.ML_URL || "http://localhost:5001";
+
 const getRecommendations = async (req, res) => {
   try {
-    const enrollments = await Enrollment.find({ learner: req.user.id }).populate("course");
-    const enrolledCategories = enrollments.map(e => e.course?.category).filter(Boolean);
+    const userId = req.user._id;
 
-    const allCourses = await Course.find().populate("trainer", "name");
+    // Get user's skills/expertise
+    const user = await User.findById(userId).select("skills expertise role");
+
+    // Get enrolled courses
+    const enrollments = await Enrollment.find({ trainee: userId })
+      .populate("course", "title description tags category");
+    const enrolledCourses = enrollments.map(e => e.course).filter(Boolean);
+
+    // Get all courses
+    const allCourses = await Course.find()
+      .populate("trainer", "name")
+      .lean();
+
+    const userSkills = [
+      ...(user?.skills    || []),
+      ...(user?.expertise || []),
+    ];
 
     // Call ML service
     try {
-      const mlRes = await axios.post(
-        `${process.env.ML_SERVICE_URL || "http://localhost:5001"}/recommend`,
-        { categories: enrolledCategories, courses: allCourses }
-      );
-      return res.json(mlRes.data);
+      const mlRes = await axios.post(`${ML_URL}/recommend`, {
+        user_skills:      userSkills,
+        enrolled_courses: enrolledCourses.map(c => ({
+          _id:         c._id?.toString(),
+          title:       c.title       || "",
+          description: c.description || "",
+          tags:        c.tags        || [],
+          category:    c.category    || "",
+        })),
+        all_courses: allCourses.map(c => ({
+          _id:         c._id?.toString(),
+          title:       c.title       || "",
+          description: c.description || "",
+          tags:        c.tags        || [],
+          category:    c.category    || "",
+          price:       c.price       || 0,
+          level:       c.level       || "Beginner",
+          trainer:     c.trainer,
+          zoomLink:    c.zoomLink    || "",
+          duration:    c.duration    || "",
+        })),
+      }, { timeout: 5000 });
+
+      return res.status(200).json(mlRes.data.recommendations || []);
     } catch (mlErr) {
-      // Fallback: return all courses if ML is down
-      return res.json({ recommendations: allCourses.slice(0, 6) });
+      console.warn("ML service unavailable, using fallback:", mlErr.message);
+
+      // Fallback — return unenrolled courses sorted by newest
+      const enrolledIds = new Set(enrolledCourses.map(c => c._id?.toString()));
+      const fallback    = allCourses
+        .filter(c => !enrolledIds.has(c._id?.toString()))
+        .slice(0, 10);
+
+      return res.status(200).json(fallback);
     }
   } catch (err) {
-    res.status(500).json({ message: "Recommendation failed", error: err.message });
+    console.error("Recommend error:", err.message);
+    res.status(500).json({ message: err.message });
   }
 };
 

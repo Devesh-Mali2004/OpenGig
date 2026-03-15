@@ -14,7 +14,7 @@ const useFetch = (apiFn) => {
     setError(null);
 
     memoFn()
-      .then((res) => { if (!cancelled) setData(res); })
+      .then((res) => { if (!cancelled) setData(res.data); })
       .catch((err) => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
 

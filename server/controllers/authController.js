@@ -1,82 +1,121 @@
 const User = require("../models/User");
 const jwt  = require("jsonwebtoken");
 
-const generateToken = (user) => {
-  return jwt.sign(
-    { id: user._id, role: user.role },
-    process.env.JWT_SECRET || "opengig_secret_key_2024",
-    { expiresIn: "7d" }
-  );
-};
+const JWT_SECRET  = process.env.JWT_SECRET  || "opengig_secret_key_2024";
+const JWT_EXPIRES = process.env.JWT_EXPIRES || "7d";
 
-// POST /api/auth/signup
+// ── Generate Token ─────────────────────────────────────────────────────────────
+const generateToken = (id) =>
+  jwt.sign({ id }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+
+// ── SIGNUP ─────────────────────────────────────────────────────────────────────
 const signup = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, phone, bio, skills, expertise } = req.body;
 
-    if (!name || !email || !password)
-      return res.status(400).json({ message: "All fields are required" });
+    // Validation
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "Name, email and password are required." });
+    }
 
-    const existing = await User.findOne({ email });
-    if (existing)
-      return res.status(400).json({ message: "Email already registered" });
+    // Check existing user
+    const existing = await User.findOne({ email: email.toLowerCase() });
+    if (existing) {
+      return res.status(400).json({ message: "An account with this email already exists." });
+    }
 
-    const user = await User.create({
-      name,
-      email,
+    // Only allow trainee and trainer to self-register
+    const allowedRoles = ["trainee", "trainer"];
+    const userRole = allowedRoles.includes(role) ? role : "trainee";
+
+    // Build user object
+    const userData = {
+      name:  name.trim(),
+      email: email.toLowerCase().trim(),
       password,
-      role: role || "trainee",
-    });
+      role:  userRole,
+    };
 
-    const token = generateToken(user);
+    if (phone)    userData.phone    = phone;
+    if (bio)      userData.bio      = bio;
+    if (skills)   userData.skills   = skills;    // array from frontend
+    if (expertise) userData.expertise = expertise; // array from frontend
+
+    const user  = await User.create(userData);
+    const token = generateToken(user._id);
+
     res.status(201).json({
+      message: "Account created successfully!",
       token,
-      role: user.role,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role },
+      user: {
+        _id:   user._id,
+        name:  user.name,
+        email: user.email,
+        role:  user.role,
+        phone: user.phone,
+        bio:   user.bio,
+      },
     });
   } catch (err) {
-    res.status(500).json({ message: "Signup failed", error: err.message });
+    console.error("Signup error:", err.message);
+    res.status(500).json({ message: "Server error. Please try again." });
   }
 };
 
-// POST /api/auth/login
+// ── LOGIN ──────────────────────────────────────────────────────────────────────
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password)
-      return res.status(400).json({ message: "Email and password required" });
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required." });
+    }
 
-    const user = await User.findOne({ email });
-    if (!user)
-      return res.status(400).json({ message: "Invalid email or password" });
+    // Find user — include password for comparison
+    const user = await User.findOne({ email: email.toLowerCase() }).select("+password");
+    if (!user) {
+      return res.status(401).json({ message: "Invalid email or password." });
+    }
 
-    if (user.isBlocked || user.status === "blocked")
-      return res.status(403).json({ message: "Your account has been blocked" });
+    // Check blocked
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Your account has been blocked. Please contact support." });
+    }
 
+    // Check password
     const isMatch = await user.matchPassword(password);
-    if (!isMatch)
-      return res.status(400).json({ message: "Invalid email or password" });
+    if (!isMatch) {
+      return res.status(401).json({ message: "Invalid email or password." });
+    }
 
-    const token = generateToken(user);
-    res.json({
+    const token = generateToken(user._id);
+
+    res.status(200).json({
+      message: "Login successful!",
       token,
-      role: user.role,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role },
+      user: {
+        _id:   user._id,
+        name:  user.name,
+        email: user.email,
+        role:  user.role,
+        phone: user.phone,
+        bio:   user.bio,
+      },
     });
   } catch (err) {
-    res.status(500).json({ message: "Login failed", error: err.message });
+    console.error("Login error:", err.message);
+    res.status(500).json({ message: "Server error. Please try again." });
   }
 };
 
-// GET /api/auth/me
+// ── GET ME ─────────────────────────────────────────────────────────────────────
 const getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("-password");
-    if (!user) return res.status(404).json({ message: "User not found" });
-    res.json(user);
+    const user = await User.findById(req.user._id).select("-password");
+    if (!user) return res.status(404).json({ message: "User not found." });
+    res.status(200).json(user);
   } catch (err) {
-    res.status(500).json({ message: "Failed to get user", error: err.message });
+    res.status(500).json({ message: "Server error." });
   }
 };
 

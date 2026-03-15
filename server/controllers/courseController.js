@@ -1,71 +1,68 @@
-const Course = require("../models/Course");
-const { createZoomMeeting } = require("../utils/zoomService");
+const Course     = require("../models/Course");
+const Enrollment = require("../models/Enrollment");
 
-// ... (getAllCourses and getMyCourses stay the same)
+const getAllCourses = async (req, res) => {
+  try {
+    const courses = await Course.find().populate("trainer", "name email bio expertise").sort({ createdAt: -1 });
+    res.status(200).json(courses);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
 
-// POST /api/courses — create course
+const getCourseById = async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id).populate("trainer", "name email bio expertise");
+    if (!course) return res.status(404).json({ message: "Course not found" });
+    res.status(200).json(course);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
+
+const getMyCourses = async (req, res) => {
+  try {
+    const courses = await Course.find({ trainer: req.user._id }).sort({ createdAt: -1 });
+    res.status(200).json(courses);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+};
+
 const createCourse = async (req, res) => {
   try {
-    const { title, description, category, price, isLive, startTime } = req.body;
-    
-    let zoomDetails = {};
-
-    // If the trainer marked it as a live course, generate the Zoom link
-    if (isLive === true || isLive === "true") {
-      const zoomData = await createZoomMeeting(title, startTime);
-      zoomDetails = {
-        meetingId: zoomData.meetingId,
-        joinUrl: zoomData.joinUrl,
-        startUrl: zoomData.startUrl,
-        startTime: startTime
-      };
-    }
-
+    const { title, description, price, category, tags, zoomLink, duration, level } = req.body;
+    if (!title || !description) return res.status(400).json({ message: "Title and description are required." });
     const course = await Course.create({
-      title, 
-      description, 
-      category, 
-      price, 
-      isLive: !!isLive, // stores as boolean
-      zoomDetails,
-      trainer: req.user.id
+      title, description,
+      price:    Number(price) || 0,
+      category: category      || "General",
+      tags:     tags          || [],
+      zoomLink: zoomLink      || "",
+      duration: duration      || "",
+      level:    level         || "Beginner",
+      trainer:  req.user._id,
     });
-
     res.status(201).json(course);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Failed to create course", error: err.message });
+    console.error("Create course error:", err.message);
+    res.status(500).json({ message: err.message });
   }
 };
 
-// ... (updateCourse and deleteCourse stay the same)
-
-module.exports = { getAllCourses, getMyCourses, createCourse, updateCourse, deleteCourse };
-
-// PUT /api/courses/:id — update course
 const updateCourse = async (req, res) => {
   try {
-    const course = await Course.findOneAndUpdate(
-      { _id: req.params.id, trainer: req.user.id },
-      req.body,
-      { new: true }
-    );
+    const course = await Course.findById(req.params.id);
     if (!course) return res.status(404).json({ message: "Course not found" });
-    res.json(course);
-  } catch (err) {
-    res.status(500).json({ message: "Failed to update course", error: err.message });
-  }
+    if (course.trainer.toString() !== req.user._id.toString()) return res.status(403).json({ message: "Not authorized" });
+    const updated = await Course.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.status(200).json(updated);
+  } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
-// DELETE /api/courses/:id
 const deleteCourse = async (req, res) => {
   try {
-    const course = await Course.findOneAndDelete({ _id: req.params.id, trainer: req.user.id });
+    const course = await Course.findById(req.params.id);
     if (!course) return res.status(404).json({ message: "Course not found" });
-    res.json({ message: "Course deleted" });
-  } catch (err) {
-    res.status(500).json({ message: "Failed to delete course", error: err.message });
-  }
+    if (course.trainer.toString() !== req.user._id.toString()) return res.status(403).json({ message: "Not authorized" });
+    await Course.findByIdAndDelete(req.params.id);
+    await Enrollment.deleteMany({ course: req.params.id });
+    res.status(200).json({ message: "Course deleted successfully" });
+  } catch (err) { res.status(500).json({ message: err.message }); }
 };
 
-module.exports = { getAllCourses, getMyCourses, createCourse, updateCourse, deleteCourse };
+module.exports = { getAllCourses, getCourseById, getMyCourses, createCourse, updateCourse, deleteCourse };
