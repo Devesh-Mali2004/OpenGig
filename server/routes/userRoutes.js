@@ -3,25 +3,25 @@ const router   = express.Router();
 const User     = require("../models/User");
 const { protect } = require("../middleware/authMiddleware");
 
-// ── Get all trainers (for trainees to start chat) ─────────────────────────────
-router.get("/trainers", protect, async (req, res) => {
+// ── Get all Mentors (for Learners to start chat) ─────────────────────────────
+router.get("/Mentors", protect, async (req, res) => {
   try {
-    const trainers = await User.find({ role: "trainer", isBlocked: false })
+    const Mentors = await User.find({ role: "Mentor", isBlocked: false })
       .select("name email bio expertise phone role")
       .sort({ name: 1 });
-    res.json(trainers);
+    res.json(Mentors);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// ── Get all trainees (for trainers to start chat) ─────────────────────────────
-router.get("/trainees", protect, async (req, res) => {
+// ── Get all Learners (for Mentors to start chat) ─────────────────────────────
+router.get("/Learners", protect, async (req, res) => {
   try {
-    const trainees = await User.find({ role: "trainee", isBlocked: false })
+    const Learners = await User.find({ role: "Learner", isBlocked: false })
       .select("name email bio skills phone role")
       .sort({ name: 1 });
-    res.json(trainees);
+    res.json(Learners);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

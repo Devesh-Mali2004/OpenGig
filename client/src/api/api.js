@@ -24,8 +24,8 @@ export const getMeAPI          = () => API.get("/auth/me");
 export const updateProfileAPI  = d => API.put("/users/profile", d);
 
 // USERS
-export const getAllTrainersAPI  = () => API.get("/users/trainers");
-export const getAllTraineesAPI  = () => API.get("/users/trainees");
+export const getAllTrainersAPI  = () => API.get("/users/Mentors");
+export const getAllTraineesAPI  = () => API.get("/users/Learners");
 
 // COURSES
 export const getAllCourses      = () => API.get("/courses");
@@ -33,7 +33,7 @@ export const getCourseById     = id => API.get(`/courses/${id}`);
 export const createCourse      = d  => API.post("/courses", d);
 export const updateCourse      = (id,d) => API.put(`/courses/${id}`, d);
 export const deleteCourse      = id => API.delete(`/courses/${id}`);
-export const getTrainerCourses = () => API.get("/courses/trainer/my-courses");
+export const getMentorCourses = () => API.get("/courses/Mentor/my-courses");
 
 // ENROLLMENTS
 export const enrollCourse      = id => API.post("/enrollments", { courseId: id });
@@ -69,7 +69,7 @@ export const goLiveAPI            = d  => API.post("/live/go-live", d);
 export const endLiveAPI           = id => API.put(`/live/end/${id}`);
 export const getActiveSessionsAPI = () => API.get("/live/active");
 export const getMySessionsAPI     = () => API.get("/live/my-sessions");
-export const getTrainerStatsAPI   = () => API.get("/live/stats");
+export const getMentorStatsAPI   = () => API.get("/live/stats");
 export const getAllSessionsAPI    = () => API.get("/live/all");
 
 // REVIEWS
@@ -83,9 +83,11 @@ export const getMyEnrollmentsAPI   = getMyEnrollments;
 export const getRecommendationsAPI = getRecommendations;
 export const getAllCoursesAPI       = getAllCourses;
 export const enrollCourseAPI       = enrollCourse;
-export const getMyCoursesAPI       = getTrainerCourses;
+export const getMyCoursesAPI       = getMentorCourses;
 export const createCourseAPI       = createCourse;
 export const deleteCourseAPI       = deleteCourse;
 export const getCourseStudentsAPI  = getCourseStudents;
 
+export const createPaymentOrderAPI = d => API.post("/payments/create-order", d);
+export const verifyPaymentAPI      = d => API.post("/payments/verify", d);
 export default API;

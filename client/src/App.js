@@ -4,8 +4,8 @@ import { useAuth } from "./context/AuthContext";
 
 import Home from "./pages/Home";
 import Login from "./pages/Login";
-import TraineeDashboard from "./pages/TraineeDashboard";
-import TrainerDashboard from "./pages/TrainerDashboard";
+import LearnerDashboard from "./pages/LearnerDashboard";
+import MentorDashboard from "./pages/MentorDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import Spinner from "./components/Spinner";
 
@@ -27,7 +27,7 @@ const RoleRedirect = () => {
   if (loading) return <Spinner />;
   if (!user) return <Navigate to="/login" replace />;
   if (user.role === "admin") return <Navigate to="/admin/dashboard" replace />;
-  if (user.role === "trainer") return <Navigate to="/trainer/dashboard" replace />;
+  if (user.role === "Mentor") return <Navigate to="/Mentor/dashboard" replace />;
   return <Navigate to="/dashboard" replace />;
 };
 
@@ -65,22 +65,22 @@ function App() {
         {/* Auto-redirect based on role */}
         <Route path="/redirect" element={<RoleRedirect />} />
 
-        {/* Trainee Routes */}
+        {/* Learner Routes */}
         <Route
           path="/dashboard"
           element={
-            <ProtectedRoute allowedRoles={["trainee"]}>
-              <TraineeDashboard />
+            <ProtectedRoute allowedRoles={["Learner"]}>
+              <LearnerDashboard />
             </ProtectedRoute>
           }
         />
 
-        {/* Trainer Routes */}
+        {/* Mentor Routes */}
         <Route
-          path="/trainer/dashboard"
+          path="/Mentor/dashboard"
           element={
-            <ProtectedRoute allowedRoles={["trainer"]}>
-              <TrainerDashboard />
+            <ProtectedRoute allowedRoles={["Mentor"]}>
+              <MentorDashboard />
             </ProtectedRoute>
           }
         />

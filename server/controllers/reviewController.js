@@ -9,7 +9,7 @@ const addReview = async (req, res) => {
     if (rating < 1 || rating > 5) return res.status(400).json({ message: "Rating must be 1-5." });
 
     // Must be enrolled to review
-    const enrolled = await Enrollment.findOne({ trainee: req.user._id, course: courseId });
+    const enrolled = await Enrollment.findOne({ Learner: req.user._id, course: courseId });
     if (!enrolled) return res.status(403).json({ message: "You must be enrolled to review this course." });
 
     // Upsert — update if already reviewed

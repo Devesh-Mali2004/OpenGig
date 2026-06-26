@@ -130,7 +130,7 @@ export default function Login() {
   // Signup fields
   const [signupData, setSignupData] = useState({
     name: "", email: "", password: "", confirmPassword: "",
-    role: "trainee", phone: "", bio: "", skills: "",
+    role: "Learner", phone: "", bio: "", skills: "",
   });
 
   const handleLoginChange = (e) =>
@@ -151,7 +151,7 @@ export default function Login() {
     try {
       const user = await loginUser(loginData.email, loginData.password);
       if (user.role === "admin")   navigate("/admin/dashboard");
-      else if (user.role === "trainer") navigate("/trainer/dashboard");
+      else if (user.role === "Mentor") navigate("/Mentor/dashboard");
       else navigate("/dashboard");
     } catch (err) {
       setError(err?.response?.data?.message || "Invalid email or password.");
@@ -183,11 +183,11 @@ export default function Login() {
     setLoading(true);
     try {
       const payload = { name, email, password, role, phone, bio };
-      if (role === "trainee" && skills) payload.skills = skills.split(",").map(s => s.trim());
-      if (role === "trainer" && skills) payload.expertise = skills.split(",").map(s => s.trim());
+      if (role === "Learner" && skills) payload.skills = skills.split(",").map(s => s.trim());
+      if (role === "Mentor" && skills) payload.expertise = skills.split(",").map(s => s.trim());
 
       const user = await registerUser(payload);
-      if (user.role === "trainer") navigate("/trainer/dashboard");
+      if (user.role === "Mentor") navigate("/Mentor/dashboard");
       else navigate("/dashboard");
     } catch (err) {
       setError(err?.response?.data?.message || "Signup failed. Try again.");
@@ -254,12 +254,12 @@ export default function Login() {
             </p>
 
             {/* Quick demo credentials */}
-            <div style={{ marginTop: "1.2rem", padding: "0.8rem", background: "#0d1117", borderRadius: "8px", border: "1px solid #1e1e35" }}>
+            {/* <div style={{ marginTop: "1.2rem", padding: "0.8rem", background: "#0d1117", borderRadius: "8px", border: "1px solid #1e1e35" }}>
               <p style={{ color: "#475569", fontSize: "0.78rem", fontWeight: 700, marginBottom: "0.4rem" }}>🧪 DEMO CREDENTIALS</p>
               {[
                 ["👑 Admin",   "admin@opengig.com",  "admin123"],
-                ["🎓 Trainer", "alice@opengig.com",  "trainer123"],
-                ["📚 Trainee", "david@opengig.com",  "trainee123"],
+                ["🎓 Mentor", "alice@opengig.com",  "Mentor123"],
+                ["📚 Learner", "david@opengig.com",  "Learner123"],
               ].map(([role, email, pass]) => (
                 <div
                   key={role}
@@ -271,7 +271,7 @@ export default function Login() {
                   <span>{role}:</span><span>{email}</span>
                 </div>
               ))}
-            </div>
+            </div> */}
           </form>
         )}
 
@@ -283,8 +283,8 @@ export default function Login() {
             <label style={{ ...S.label, marginTop: 0 }}>I want to join as</label>
             <div style={S.roleGrid}>
               {[
-                { value: "trainee", icon: "📚", title: "Trainee", desc: "I want to learn & grow skills" },
-                { value: "trainer", icon: "🎓", title: "Trainer", desc: "I want to teach & earn" },
+                { value: "Learner", icon: "📚", title: "Learner", desc: "I want to learn & grow skills" },
+                { value: "Mentor", icon: "🎓", title: "Mentor", desc: "I want to teach & earn" },
               ].map((r) => (
                 <div
                   key={r.value}
@@ -327,7 +327,7 @@ export default function Login() {
             />
 
             {/* Role-specific fields */}
-            {signupData.role === "trainee" && (
+            {signupData.role === "Learner" && (
               <>
                 <label style={S.label}>Skills I Want to Learn</label>
                 <input
@@ -340,7 +340,7 @@ export default function Login() {
               </>
             )}
 
-            {signupData.role === "trainer" && (
+            {signupData.role === "Mentor" && (
               <>
                 <label style={S.label}>Areas of Expertise</label>
                 <input
@@ -354,7 +354,7 @@ export default function Login() {
                 <textarea
                   style={{ ...S.input, resize: "vertical", minHeight: "80px" }}
                   name="bio"
-                  placeholder="Tell trainees about your experience..."
+                  placeholder="Tell Learners about your experience..."
                   value={signupData.bio} onChange={handleSignupChange}
                   onFocus={e => e.target.style.borderColor = "#6d28d9"}
                   onBlur={e  => e.target.style.borderColor = "#1e1e35"}
@@ -386,7 +386,7 @@ export default function Login() {
             <button type="submit" style={S.submitBtn(loading)} disabled={loading}>
               {loading
                 ? "Creating account..."
-                : `Create ${signupData.role === "trainer" ? "Trainer" : "Trainee"} Account →`}
+                : `Create ${signupData.role === "Mentor" ? "Mentor" : "Learner"} Account →`}
             </button>
 
             <p style={S.divider}>

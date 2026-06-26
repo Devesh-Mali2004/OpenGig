@@ -6,6 +6,7 @@ import Spinner from "../components/Spinner";
 import { useAuth } from "../context/AuthContext";
 import { useSocket } from "../context/SocketContext";
 import { getGreeting } from "../utils/helpers";
+import CourseDetailModal from "../components/CourseDetailModal";
 import {
   getMyEnrollmentsAPI, getRecommendationsAPI, getAllCoursesAPI,
   enrollCourseAPI, updateProfileAPI, getActiveSessionsAPI,
@@ -26,7 +27,7 @@ const NAV = [
   { id:"profile",         label:"Profile",        icon:"👤" },
 ];
 
-export default function TraineeDashboard() {
+export default function LearnerDashboard() {
   const [tab,         setTab]         = useState("dashboard");
   const [search,      setSearch]      = useState("");
   const [cat,         setCat]         = useState("All");
@@ -46,6 +47,7 @@ export default function TraineeDashboard() {
   const [reviewForm,  setReviewForm]  = useState({ rating:5, comment:"" });
   const [reviewBusy,  setReviewBusy]  = useState(false);
   const [myReviews,   setMyReviews]   = useState([]);
+  const [selectedCourse, setSelectedCourse] = useState(null);
   const { user }   = useAuth();
   const { socket } = useSocket() || {};
 
@@ -105,16 +107,20 @@ export default function TraineeDashboard() {
            (cat==="All"||c.category?.toLowerCase().includes(cat.toLowerCase()));
   });
 
-  const handleEnroll = async id => {
-    if (enrollingId) return;
-    setEnrollingId(id);
-    try {
-      const r = await enrollCourseAPI(id);
-      if (r.data?.message?.toLowerCase().includes("already")) showToast("Already enrolled!","warning");
-      else { showToast("Enrolled! 🎉"); fetchE(); fetchR(); }
-    } catch(e) { showToast(e?.response?.data?.message||"Failed.","error"); }
-    finally { setEnrollingId(null); }
-  };
+ const handleEnroll = async id => {
+  // Paid courses → open detail modal for payment
+  const course = allCourses.find(c => c._id?.toString() === id?.toString());
+  if (course?.price > 0) { setSelectedCourse(course); return; }
+
+  if (enrollingId) return;
+  setEnrollingId(id);
+  try {
+    const r = await enrollCourseAPI(id);
+    if (r.data?.message?.toLowerCase().includes("already")) showToast("Already enrolled!", "warning");
+    else { showToast("Enrolled! 🎉"); fetchE(); fetchR(); }
+  } catch(e) { showToast(e?.response?.data?.message || "Failed.", "error"); }
+  finally { setEnrollingId(null); }
+};
 
   const handleProfile = async e => {
     e.preventDefault(); setProfErr(""); setProfBusy(true);
@@ -160,14 +166,14 @@ export default function TraineeDashboard() {
 
   return (
     <div style={{display:"flex",minHeight:"100vh",background:"#f9fafb",fontFamily:"ui-sans-serif,system-ui,sans-serif"}}>
-      <Sidebar activeTab={tab} setActiveTab={setTab} navItems={navWithBadge} role="trainee"/>
+      <Sidebar activeTab={tab} setActiveTab={setTab} navItems={navWithBadge} role="Learner"/>
 
       <main style={{marginLeft:220,flex:1,display:"flex",flexDirection:"column"}}>
         <header style={{background:"#fff",borderBottom:"1px solid #f3f4f6",padding:"12px 28px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:30}}>
           <div>
             <h2 style={{fontSize:16,fontWeight:700,color:"#111827",margin:0}}>{getGreeting()}, {user?.name?.split(" ")[0]} 👋</h2>
             <p style={{fontSize:11,color:"#9ca3af",marginTop:2}}>
-              Trainee Dashboard
+              Learner Dashboard
               {liveCount>0&&<span onClick={()=>setTab("live")} style={{marginLeft:8,background:"#fef2f2",color:"#dc2626",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:999,cursor:"pointer"}}>🔴 {liveCount} Live Now</span>}
             </p>
           </div>
@@ -193,7 +199,7 @@ export default function TraineeDashboard() {
                 <div style={{background:"linear-gradient(135deg,#fef2f2,#fee2e2)",border:"2px solid #fca5a5",borderRadius:12,padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div>
                     <p style={{margin:0,fontWeight:700,color:"#dc2626",fontSize:14}}>🔴 Live Session in Progress!</p>
-                    <p style={{margin:"4px 0 0",color:"#6b7280",fontSize:12}}>{activeSess[0].trainer?.name} is live: "{activeSess[0].title}"</p>
+                    <p style={{margin:"4px 0 0",color:"#6b7280",fontSize:12}}>{activeSess[0].Mentor?.name} is live: "{activeSess[0].title}"</p>
                   </div>
                   <button onClick={()=>window.open(activeSess[0].zoomLink,"_blank","noopener,noreferrer")}
                     style={{background:"#dc2626",color:"#fff",border:"none",fontSize:13,fontWeight:700,padding:"9px 20px",borderRadius:8,cursor:"pointer"}}>Join Now →</button>
@@ -228,8 +234,7 @@ export default function TraineeDashboard() {
                 </div>
                 {loadingR?<Spinner/>:recommended.length===0?<Empty icon="✨" title="No recommendations yet" desc="Enroll in courses to get AI suggestions!"/>:(
                   <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
-                    {recommended.slice(0,4).map(c=><CourseCard key={c._id} course={c} enrolled={isEnrolled(c._id)} enrolling={enrollingId===c._id} onEnroll={()=>handleEnroll(c._id)}/>)}
-                  </div>
+{recommended.slice(0,4).map(c=><CourseCard key={c._id} course={c} enrolled={isEnrolled(c._id)} enrolling={enrollingId===c._id} onEnroll={()=>handleEnroll(c._id)} onView={()=>setSelectedCourse(c)}/>)}                  </div>
                 )}
               </section>
             </div>
@@ -247,8 +252,7 @@ export default function TraineeDashboard() {
               </div>
               {loadingC?<Spinner/>:filtered.length===0?<Empty icon="🔍" title="No courses found" desc="Try different search or category" btn="Clear" onBtn={()=>{setSearch("");setCat("All");}}/>:(
                 <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14}}>
-                  {filtered.map(c=><CourseCard key={c._id} course={c} enrolled={isEnrolled(c._id)} enrolling={enrollingId===c._id} onEnroll={()=>handleEnroll(c._id)}/>)}
-                </div>
+{filtered.map(c=><CourseCard key={c._id} course={c} enrolled={isEnrolled(c._id)} enrolling={enrollingId===c._id} onEnroll={()=>handleEnroll(c._id)} onView={()=>setSelectedCourse(c)}/>)}                </div>
               )}
             </div>
           )}
@@ -269,11 +273,10 @@ export default function TraineeDashboard() {
           {tab==="recommendations"&&(
             <div>
               <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:4}}>AI Recommendations</h2>
-              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>Personalised using TF-IDF + Cosine Similarity on your enrolled courses</p>
+              {/* <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>Personalised using TF-IDF + Cosine Similarity on your enrolled courses</p> */}
               {loadingR?<Spinner/>:recommended.length===0?<Empty icon="✨" title="No recommendations yet" desc="Enroll in more courses to improve suggestions!"/>:(
                 <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14}}>
-                  {recommended.map(c=><CourseCard key={c._id} course={c} enrolled={isEnrolled(c._id)} enrolling={enrollingId===c._id} onEnroll={()=>handleEnroll(c._id)}/>)}
-                </div>
+{recommended.map(c=><CourseCard key={c._id} course={c} enrolled={isEnrolled(c._id)} enrolling={enrollingId===c._id} onEnroll={()=>handleEnroll(c._id)} onView={()=>setSelectedCourse(c)}/>)}                </div>
               )}
             </div>
           )}
@@ -282,8 +285,8 @@ export default function TraineeDashboard() {
           {tab==="live"&&(
             <div>
               <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:4}}>🔴 Live Sessions</h2>
-              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>Join live sessions from your trainers — links auto-generated with Jitsi Meet</p>
-              {activeSess.length===0?<Empty icon="🔴" title="No live sessions right now" desc="You will get a real-time notification when a trainer goes live!"/>:(
+              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>Join live sessions from your Mentors — links auto-generated with Jitsi Meet</p>
+              {activeSess.length===0?<Empty icon="🔴" title="No live sessions right now" desc="You will get a real-time notification when a Mentor goes live!"/>:(
                 <div style={{display:"flex",flexDirection:"column",gap:12}}>
                   {activeSess.map(s=>(
                     <div key={s._id} style={{background:"linear-gradient(135deg,#fef2f2,#fff)",border:"2px solid #fca5a5",borderRadius:14,padding:20,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -293,7 +296,7 @@ export default function TraineeDashboard() {
                           <span style={{fontSize:12,fontWeight:700,color:"#dc2626"}}>LIVE NOW</span>
                         </div>
                         <h4 style={{fontSize:15,fontWeight:700,color:"#111827",margin:"0 0 4px"}}>{s.title}</h4>
-                        <p style={{fontSize:12,color:"#6b7280",margin:0}}>by {s.trainer?.name} {s.course?.title?`· ${s.course.title}`:""}</p>
+                        <p style={{fontSize:12,color:"#6b7280",margin:0}}>by {s.Mentor?.name} {s.course?.title?`· ${s.course.title}`:""}</p>
                         <p style={{fontSize:11,color:"#9ca3af",margin:"4px 0 0"}}>Meeting: <a href={s.zoomLink} target="_blank" rel="noreferrer" style={{color:"#0d9488"}}>{s.zoomLink?.slice(0,50)}...</a></p>
                       </div>
                       <button onClick={()=>window.open(s.zoomLink,"_blank","noopener,noreferrer")}
@@ -316,7 +319,7 @@ export default function TraineeDashboard() {
                   <div key={c._id} style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",padding:16,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                     <div>
                       <h4 style={{fontSize:14,fontWeight:600,color:"#111827",margin:0}}>{c.title}</h4>
-                      <p style={{fontSize:12,color:"#9ca3af",marginTop:4}}>by {c.trainer?.name||"Trainer"}</p>
+                      <p style={{fontSize:12,color:"#9ca3af",marginTop:4}}>by {c.Mentor?.name||"Mentor"}</p>
                     </div>
                     <button onClick={()=>window.open(c.zoomLink,"_blank","noopener,noreferrer")} style={{background:"#2563eb",color:"#fff",border:"none",fontSize:12,fontWeight:600,padding:"8px 18px",borderRadius:8,cursor:"pointer"}}>Join</button>
                   </div>
@@ -341,7 +344,7 @@ export default function TraineeDashboard() {
               {reviewCourse&&(
                 <div style={{background:"#fff",borderRadius:12,border:"2px solid #0d9488",padding:24,marginBottom:24}}>
                   <h3 style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:4}}>Review: {reviewCourse.title}</h3>
-                  <p style={{fontSize:12,color:"#9ca3af",marginBottom:16}}>Your honest feedback helps other trainees</p>
+                  <p style={{fontSize:12,color:"#9ca3af",marginBottom:16}}>Your honest feedback helps other Learners</p>
                   <div style={{marginBottom:14}}>
                     <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:6}}>Your Rating</label>
                     {stars(reviewForm.rating,true,r=>setReviewForm(p=>({...p,rating:r})))}
@@ -366,7 +369,7 @@ export default function TraineeDashboard() {
                     return (
                       <div key={c._id} style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",padding:16}}>
                         <h4 style={{fontSize:13,fontWeight:700,color:"#111827",margin:"0 0 6px",lineHeight:1.4}}>{c.title}</h4>
-                        <p style={{fontSize:11,color:"#9ca3af",margin:"0 0 12px"}}>by {c.trainer?.name||"Trainer"}</p>
+                        <p style={{fontSize:11,color:"#9ca3af",margin:"0 0 12px"}}>by {c.Mentor?.name||"Mentor"}</p>
                         {rv?(
                           <div>
                             {stars(rv.rating)}
@@ -392,7 +395,7 @@ export default function TraineeDashboard() {
                 <div style={{textAlign:"center",marginBottom:24}}>
                   <div style={{width:72,height:72,borderRadius:"50%",background:"linear-gradient(135deg,#0d9488,#7c3aed)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,fontWeight:700,margin:"0 auto 10px"}}>{user?.name?.[0]?.toUpperCase()}</div>
                   <p style={{fontWeight:700,color:"#111827",fontSize:16,margin:0}}>{user?.name}</p>
-                  <span style={{fontSize:11,padding:"2px 10px",borderRadius:999,background:"#ccfbf1",color:"#0f766e",fontWeight:600}}>Trainee</span>
+                  <span style={{fontSize:11,padding:"2px 10px",borderRadius:999,background:"#ccfbf1",color:"#0f766e",fontWeight:600}}>Learner</span>
                 </div>
                 {profErr&&<div style={{background:"#fef2f2",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>⚠️ {profErr}</div>}
                 <form onSubmit={handleProfile}>
@@ -403,7 +406,7 @@ export default function TraineeDashboard() {
                     <PF label="Skills (comma separated)" value={profile.skills} onChange={v=>setProfile(p=>({...p,skills:v}))} ph="React, Python, UI/UX"/>
                     <div>
                       <label style={LS}>Bio</label>
-                      <textarea value={profile.bio} onChange={e=>setProfile(p=>({...p,bio:e.target.value}))} placeholder="Tell trainers about yourself..."
+                      <textarea value={profile.bio} onChange={e=>setProfile(p=>({...p,bio:e.target.value}))} placeholder="Tell Mentors about yourself..."
                         style={{...IS,minHeight:80,resize:"vertical",fontFamily:"inherit"}}/>
                     </div>
                     <button type="submit" disabled={profBusy} style={{background:"#0d9488",color:"#fff",border:"none",borderRadius:8,padding:"11px 0",fontSize:14,fontWeight:600,cursor:profBusy?"not-allowed":"pointer",opacity:profBusy?0.7:1}}>
@@ -415,6 +418,15 @@ export default function TraineeDashboard() {
             </div>
           )}
         </div>
+        {selectedCourse && (
+  <CourseDetailModal
+    course={selectedCourse}
+    isEnrolled={isEnrolled(selectedCourse._id)}
+    onClose={() => setSelectedCourse(null)}
+    onEnrollSuccess={() => { fetchE(); fetchR(); }}
+    user={user}
+  />
+)}
       </main>
     </div>
   );
@@ -426,7 +438,7 @@ function EnrolledCard({ course, onReview }) {
       <div style={{height:70,background:"linear-gradient(135deg,#0d9488,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:28}}>📚</span></div>
       <div style={{padding:14}}>
         <h4 style={{fontSize:13,fontWeight:700,color:"#111827",margin:"0 0 4px",lineHeight:1.4}}>{course.title}</h4>
-        <p style={{fontSize:11,color:"#9ca3af",margin:"0 0 10px"}}>by {course.trainer?.name||"Trainer"}</p>
+        <p style={{fontSize:11,color:"#9ca3af",margin:"0 0 10px"}}>by {course.Mentor?.name||"Mentor"}</p>
         <div style={{display:"flex",gap:6}}>
           <span style={{fontSize:11,padding:"2px 8px",borderRadius:999,background:"#f0fdf4",color:"#16a34a",fontWeight:600}}>✅ Enrolled</span>
           <button onClick={onReview} style={{fontSize:11,padding:"2px 8px",borderRadius:999,background:"#fffbeb",color:"#d97706",fontWeight:600,border:"none",cursor:"pointer"}}>⭐ Review</button>
@@ -436,24 +448,33 @@ function EnrolledCard({ course, onReview }) {
   );
 }
 
-function CourseCard({ course, enrolled, enrolling, onEnroll }) {
+function CourseCard({ course, enrolled, enrolling, onEnroll, onView }) {
+  const isPaid = (course.price || 0) > 0;
   return (
-    <div style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",overflow:"hidden",display:"flex",flexDirection:"column",transition:"box-shadow 0.2s"}}
+    <div
+      onClick={onView}
+      style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",overflow:"hidden",display:"flex",flexDirection:"column",transition:"box-shadow 0.2s",cursor:"pointer"}}
       onMouseEnter={e=>e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,0.08)"}
       onMouseLeave={e=>e.currentTarget.style.boxShadow="none"}>
-      <div style={{height:80,background:"linear-gradient(135deg,#0d9488,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:32}}>📚</span></div>
+      <div style={{height:80,background:"linear-gradient(135deg,#0d9488,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
+        <span style={{fontSize:32}}>📚</span>
+        {isPaid && <span style={{position:"absolute",top:8,right:8,background:"#fff",color:"#0f766e",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:999}}>₹{course.price}</span>}
+        {course.demoVideo && <span style={{position:"absolute",top:8,left:8,background:"rgba(0,0,0,0.45)",color:"#fff",fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:999}}>🎬 Demo</span>}
+      </div>
       <div style={{padding:14,flex:1,display:"flex",flexDirection:"column"}}>
         <h4 style={{fontSize:13,fontWeight:700,color:"#111827",margin:"0 0 4px",lineHeight:1.4}}>{course.title}</h4>
         <p style={{fontSize:11,color:"#9ca3af",marginBottom:8,flex:1}}>{course.description?.slice(0,65)}...</p>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
           <span style={{fontSize:11,color:"#0d9488",fontWeight:600}}>{course.level||"Beginner"}</span>
-          <span style={{fontSize:12,fontWeight:700,color:"#111827"}}>{course.price===0||!course.price?"Free":`₹${course.price}`}</span>
+          <span style={{fontSize:12,fontWeight:700,color:isPaid?"#111827":"#16a34a"}}>{isPaid?`₹${course.price}`:"Free"}</span>
         </div>
-        <button onClick={onEnroll} disabled={enrolled||enrolling}
+        <button
+          onClick={e=>{e.stopPropagation(); isPaid ? onView() : onEnroll();}}
+          disabled={enrolled||enrolling}
           style={{width:"100%",padding:"8px",borderRadius:8,border:"none",cursor:enrolled||enrolling?"not-allowed":"pointer",fontWeight:600,fontSize:12,
-            background:enrolled?"#f0fdf4":enrolling?"#e0e7ff":"#0d9488",
+            background:enrolled?"#f0fdf4":enrolling?"#e0e7ff":isPaid?"#111827":"#0d9488",
             color:enrolled?"#16a34a":enrolling?"#4338ca":"#fff"}}>
-          {enrolled?"✅ Enrolled":enrolling?"Enrolling...":"Enroll Free"}
+          {enrolled?"✅ Enrolled":enrolling?"Enrolling...":isPaid?`💳 Buy ₹${course.price}`:"Enroll Free"}
         </button>
       </div>
     </div>

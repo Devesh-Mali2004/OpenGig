@@ -6,11 +6,11 @@ const userSchema = new mongoose.Schema(
     name:      { type: String, required: true, trim: true },
     email:     { type: String, required: true, unique: true, lowercase: true, trim: true },
     password:  { type: String, required: true, select: false },
-    role:      { type: String, enum: ["trainee", "trainer", "admin"], default: "trainee" },
+    role:      { type: String, enum: ["Learner", "Mentor", "admin"], default: "Learner" },
     phone:     { type: String, default: "" },
     bio:       { type: String, default: "" },
-    skills:    [{ type: String }],     // for trainees — what they want to learn
-    expertise: [{ type: String }],     // for trainers — what they teach
+    skills:    [{ type: String }],     // for Learners — what they want to learn
+    expertise: [{ type: String }],     // for Mentors — what they teach
     isBlocked: { type: Boolean, default: false },
     status:    { type: String, default: "active" },
   },

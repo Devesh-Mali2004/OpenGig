@@ -40,7 +40,7 @@ async function apiGetConversations() {
 }
 
 async function apiGetUsers(myRole) {
-  const endpoint = myRole === "trainer" ? "trainees" : "trainers";
+  const endpoint = myRole === "Mentor" ? "Learners" : "Mentors";
   const res  = await fetch(`${BASE}/users/${endpoint}`, { headers: getHeaders() });
   const data = await res.json();
   if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
@@ -269,7 +269,7 @@ export default function Chat() {
     return (
       <VideoCall
         roomName={videoRoomId}
-        isHost={user?.role === "trainer"}
+        isHost={user?.role === "Mentor"}
         onClose={() => setInVideoCall(false)}
       />
     );
@@ -285,7 +285,7 @@ export default function Chat() {
             <div>
               <h3 style={{ fontSize: 14, fontWeight: 700, color: "#111827", margin: 0 }}>💬 Messages</h3>
               <p style={{ fontSize: 11, color: "#9ca3af", margin: "2px 0 0" }}>
-                {user?.role === "trainer" ? "Chat with students" : "Chat with trainers"}
+                {user?.role === "Mentor" ? "Chat with students" : "Chat with Mentors"}
               </p>
             </div>
             <button onClick={openNewChat} title="Start new conversation"
@@ -300,7 +300,7 @@ export default function Chat() {
           <div style={{ padding: "10px 12px", borderBottom: "1px solid #f3f4f6", background: "#f0fdf4" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <p style={{ fontSize: 12, fontWeight: 700, color: "#0f766e", margin: 0 }}>
-                {user?.role === "trainer" ? "Find a Student" : "Find a Trainer"}
+                {user?.role === "Mentor" ? "Find a Student" : "Find a Mentor"}
               </p>
               <button onClick={() => setShowNewChat(false)}
                 style={{ background: "none", border: "none", cursor: "pointer", color: "#6b7280", fontSize: 18, lineHeight: 1, padding: 0 }}>×</button>

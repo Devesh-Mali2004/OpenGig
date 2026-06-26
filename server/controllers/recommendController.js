@@ -13,13 +13,13 @@ const getRecommendations = async (req, res) => {
     const user = await User.findById(userId).select("skills expertise role");
 
     // Get enrolled courses
-    const enrollments = await Enrollment.find({ trainee: userId })
+    const enrollments = await Enrollment.find({ Learner: userId })
       .populate("course", "title description tags category");
     const enrolledCourses = enrollments.map(e => e.course).filter(Boolean);
 
     // Get all courses
     const allCourses = await Course.find()
-      .populate("trainer", "name")
+      .populate("Mentor", "name")
       .lean();
 
     const userSkills = [
@@ -46,7 +46,7 @@ const getRecommendations = async (req, res) => {
           category:    c.category    || "",
           price:       c.price       || 0,
           level:       c.level       || "Beginner",
-          trainer:     c.trainer,
+          Mentor:     c.Mentor,
           zoomLink:    c.zoomLink    || "",
           duration:    c.duration    || "",
         })),

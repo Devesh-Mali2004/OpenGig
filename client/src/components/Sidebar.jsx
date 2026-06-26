@@ -29,7 +29,7 @@ export default function Sidebar({ activeTab, setActiveTab, navItems = [], role }
           <div>
             <p style={{ fontSize: 16, fontWeight: 800, color: "#fff", margin: 0 }}>OpenGig</p>
             <p style={{ fontSize: 10, color: "#6b7280", margin: 0 }}>
-              {role === "admin" ? "Admin Panel" : role === "trainer" ? "Trainer Portal" : "Learning Platform"}
+              {role === "admin" ? "Admin Panel" : role === "Mentor" ? "Mentor Portal" : "Learning Platform"}
             </p>
           </div>
         </div>

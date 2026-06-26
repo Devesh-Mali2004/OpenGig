@@ -15,7 +15,7 @@ export default function CourseCard({ course, type = "recommended", onEnroll }) {
       <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f3f4f6", padding: 14 }}>
         <p style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginBottom: 2 }}>{course.title}</p>
         <p style={{ fontSize: 11, color: "#9ca3af", marginBottom: 10 }}>
-          by {course.trainer?.name || course.trainer} · {course.category}
+          by {course.Mentor?.name || course.Mentor} · {course.category}
         </p>
         <div style={{ marginBottom: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#9ca3af", marginBottom: 4 }}>
@@ -53,7 +53,7 @@ export default function CourseCard({ course, type = "recommended", onEnroll }) {
       </div>
       <p style={{ fontSize: 12, fontWeight: 700, color: "#111827", margin: "8px 0 2px", lineHeight: 1.3 }}>{course.title}</p>
       <p style={{ fontSize: 11, color: "#9ca3af", marginBottom: 10 }}>
-        by {course.trainer?.name || course.trainer}
+        by {course.Mentor?.name || course.Mentor}
       </p>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 11, color: "#374151" }}>⭐ {course.rating || "4.5"}</span>

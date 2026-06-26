@@ -85,7 +85,7 @@ app.use("/api/chat",          require("./routes/chatRoutes"));
 app.use("/api/notifications", require("./routes/notificationRoutes"));
 app.use("/api/live",          require("./routes/liveSessionRoutes"));
 app.use("/api/reviews",       require("./routes/reviewRoutes"));
-
+app.use("/api/payments", require("./routes/paymentRoutes"));
 app.get("/", (req, res) => res.json({ status: "OpenGig API ✅", realtime: "Socket.io enabled" }));
 
 // ── Start ─────────────────────────────────────────────────────────────────────

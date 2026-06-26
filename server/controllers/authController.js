@@ -24,9 +24,9 @@ const signup = async (req, res) => {
       return res.status(400).json({ message: "An account with this email already exists." });
     }
 
-    // Only allow trainee and trainer to self-register
-    const allowedRoles = ["trainee", "trainer"];
-    const userRole = allowedRoles.includes(role) ? role : "trainee";
+    // Only allow Learner and Mentor to self-register
+    const allowedRoles = ["Learner", "Mentor"];
+    const userRole = allowedRoles.includes(role) ? role : "Learner";
 
     // Build user object
     const userData = {

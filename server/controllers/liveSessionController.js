@@ -24,38 +24,38 @@ const goLive = async (req, res) => {
     // Auto-generate or use custom link
     const meetingLink = customLink?.trim() || generateMeetingLink(title, courseId);
 
-    // End any previous live session by this trainer
+    // End any previous live session by this Mentor
     await LiveSession.updateMany(
-      { trainer: req.user._id, isLive: true },
+      { Mentor: req.user._id, isLive: true },
       { isLive: false, endedAt: new Date() }
     );
 
     // Create new session
     const session = await LiveSession.create({
-      trainer:  req.user._id,
+      Mentor:  req.user._id,
       course:   courseId || null,
       title:    title.trim(),
       zoomLink: meetingLink,
       isLive:   true,
     });
 
-    // Find trainees to notify
-    let traineeIds = [];
+    // Find Learners to notify
+    let LearnerIds = [];
     let courseTitle = "";
 
     if (courseId) {
-      const enrollments = await Enrollment.find({ course: courseId }).select("trainee");
-      traineeIds = enrollments.map(e => e.trainee.toString());
+      const enrollments = await Enrollment.find({ course: courseId }).select("Learner");
+      LearnerIds = enrollments.map(e => e.Learner.toString());
       const course = await Course.findById(courseId).select("title");
       courseTitle = course?.title || "";
     } else {
-      const trainees = await User.find({ role: "trainee", isBlocked: false }).select("_id");
-      traineeIds = trainees.map(t => t._id.toString());
+      const Learners = await User.find({ role: "Learner", isBlocked: false }).select("_id");
+      LearnerIds = Learners.map(t => t._id.toString());
     }
 
     // Create notifications
-    if (traineeIds.length > 0) {
-      const notifs = traineeIds.map(tid => ({
+    if (LearnerIds.length > 0) {
+      const notifs = LearnerIds.map(tid => ({
         recipient: tid,
         sender:    req.user._id,
         type:      "live_session",
@@ -66,10 +66,10 @@ const goLive = async (req, res) => {
       }));
       await Notification.insertMany(notifs);
 
-      // Real-time socket push to all trainees
+      // Real-time socket push to all Learners
       const io = req.app.get("io");
       if (io) {
-        traineeIds.forEach(tid => {
+        LearnerIds.forEach(tid => {
           io.to(`user:${tid}`).emit("notification:new", {
             type:    "live_session",
             title:   `🔴 ${req.user.name} is Live!`,
@@ -80,12 +80,12 @@ const goLive = async (req, res) => {
       }
     }
 
-    await session.populate("trainer", "name email");
+    await session.populate("Mentor", "name email");
 
     res.status(201).json({
-      message:     `🔴 You are live! ${traineeIds.length} trainees notified.`,
+      message:     `🔴 You are live! ${LearnerIds.length} Learners notified.`,
       session,
-      meetingLink, // Return so trainer can see/copy it
+      meetingLink, // Return so Mentor can see/copy it
     });
   } catch (err) {
     console.error("Go live error:", err.message);
@@ -98,7 +98,7 @@ const endLive = async (req, res) => {
   try {
     const session = await LiveSession.findById(req.params.id);
     if (!session) return res.status(404).json({ message: "Session not found." });
-    if (session.trainer.toString() !== req.user._id.toString()) {
+    if (session.Mentor.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: "Not authorized." });
     }
 
@@ -116,7 +116,7 @@ const endLive = async (req, res) => {
 const getActiveSessions = async (req, res) => {
   try {
     const sessions = await LiveSession.find({ isLive: true })
-      .populate("trainer", "name email")
+      .populate("Mentor", "name email")
       .populate("course",  "title")
       .sort({ createdAt: -1 });
     res.status(200).json(sessions);
@@ -125,10 +125,10 @@ const getActiveSessions = async (req, res) => {
   }
 };
 
-// ── GET MY SESSIONS (trainer) ─────────────────────────────────────────────────
+// ── GET MY SESSIONS (Mentor) ─────────────────────────────────────────────────
 const getMySessions = async (req, res) => {
   try {
-    const sessions = await LiveSession.find({ trainer: req.user._id })
+    const sessions = await LiveSession.find({ Mentor: req.user._id })
       .populate("course", "title")
       .sort({ createdAt: -1 })
       .limit(20);
@@ -138,14 +138,14 @@ const getMySessions = async (req, res) => {
   }
 };
 
-// ── GET TRAINER STATS ─────────────────────────────────────────────────────────
-const getTrainerStats = async (req, res) => {
+// ── GET Mentor STATS ─────────────────────────────────────────────────────────
+const getMentorStats = async (req, res) => {
   try {
-    const courses        = await Course.find({ trainer: req.user._id });
+    const courses        = await Course.find({ Mentor: req.user._id });
     const courseIds      = courses.map(c => c._id);
     const totalEnrollments = await Enrollment.countDocuments({ course: { $in: courseIds } });
-    const activeSessions   = await LiveSession.countDocuments({ trainer: req.user._id, isLive: true });
-    const totalSessions    = await LiveSession.countDocuments({ trainer: req.user._id });
+    const activeSessions   = await LiveSession.countDocuments({ Mentor: req.user._id, isLive: true });
+    const totalSessions    = await LiveSession.countDocuments({ Mentor: req.user._id });
 
     res.status(200).json({
       totalCourses: courses.length, totalEnrollments,
@@ -161,7 +161,7 @@ const getTrainerStats = async (req, res) => {
 const getAllSessions = async (req, res) => {
   try {
     const sessions = await LiveSession.find()
-      .populate("trainer", "name email")
+      .populate("Mentor", "name email")
       .populate("course",  "title")
       .sort({ createdAt: -1 });
     res.status(200).json(sessions);
@@ -170,4 +170,4 @@ const getAllSessions = async (req, res) => {
   }
 };
 
-module.exports = { goLive, endLive, getActiveSessions, getMySessions, getTrainerStats, getAllSessions };
+module.exports = { goLive, endLive, getActiveSessions, getMySessions, getMentorStats, getAllSessions };

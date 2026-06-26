@@ -7,8 +7,8 @@ const LiveSession = require("../models/LiveSession");
 const getStats = async (req, res) => {
   try {
     const totalUsers       = await User.countDocuments();
-    const totalTrainers    = await User.countDocuments({ role: "trainer" });
-    const totalTrainees    = await User.countDocuments({ role: "trainee" });
+    const totalMentors    = await User.countDocuments({ role: "Mentor" });
+    const totalLearners    = await User.countDocuments({ role: "Learner" });
     const totalCourses     = await Course.countDocuments();
     const totalEnrollments = await Enrollment.countDocuments();
     const blockedUsers     = await User.countDocuments({ isBlocked: true });
@@ -16,7 +16,7 @@ const getStats = async (req, res) => {
     const totalSessions    = await LiveSession.countDocuments();
 
     res.status(200).json({
-      totalUsers, totalTrainers, totalTrainees,
+      totalUsers, totalMentors, totalLearners,
       totalCourses, totalEnrollments, blockedUsers,
       activeSessions, totalSessions,
     });
@@ -64,7 +64,7 @@ const deleteUser = async (req, res) => {
 const getAllCourses = async (req, res) => {
   try {
     const courses = await Course.find()
-      .populate("trainer", "name email")
+      .populate("Mentor", "name email")
       .sort({ createdAt: -1 });
     // Attach enrollment count
     const withCounts = await Promise.all(courses.map(async (c) => {

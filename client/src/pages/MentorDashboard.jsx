@@ -8,7 +8,7 @@ import { useSocket } from "../context/SocketContext";
 import {
   getMyCoursesAPI, createCourseAPI, deleteCourseAPI,
   getCourseStudentsAPI, updateProfileAPI,
-  goLiveAPI, endLiveAPI, getMySessionsAPI, getTrainerStatsAPI,
+  goLiveAPI, endLiveAPI, getMySessionsAPI, getMentorStatsAPI,
   getCourseReviewsAPI,
 } from "../api/api";
 import { getGreeting } from "../utils/helpers";
@@ -24,9 +24,8 @@ const NAV = [
   { id:"profile",   label:"Profile",    icon:"👤" },
 ];
 
-const EMPTY = { title:"", description:"", category:"", price:"", zoomLink:"", level:"Beginner", duration:"" };
-
-export default function TrainerDashboard() {
+const EMPTY = { title:"", description:"", category:"", price:"", zoomLink:"", level:"Beginner", duration:"", demoVideo:"" };
+export default function MentorDashboard() {
   const [tab,         setTab]         = useState("dashboard");
   const [courses,     setCourses]     = useState([]);
   const [loadingC,    setLoadingC]    = useState(true);
@@ -55,7 +54,7 @@ export default function TrainerDashboard() {
   const { socket } = useSocket() || {};
   const statsRef   = useRef(null);
 
-  useEffect(() => { document.title = `${NAV.find(n=>n.id===tab)?.label||"Dashboard"} — Trainer`; }, [tab]);
+  useEffect(() => { document.title = `${NAV.find(n=>n.id===tab)?.label||"Dashboard"} — Mentor`; }, [tab]);
 
   useEffect(() => {
     if (user) setProfile({ name:user.name||"", phone:user.phone||"", bio:user.bio||"", expertise:Array.isArray(user.expertise)?user.expertise.join(", "):"" });
@@ -70,7 +69,7 @@ export default function TrainerDashboard() {
   }, []);
 
   const fetchStats = useCallback(async () => {
-    try { const r = await getTrainerStatsAPI(); setStats(r.data||stats); } catch {}
+    try { const r = await getMentorStatsAPI(); setStats(r.data||stats); } catch {}
   }, []);
 
   const fetchSessions = useCallback(async () => {
@@ -104,7 +103,7 @@ export default function TrainerDashboard() {
       const r = await createCourseAPI({...form, price:Number(form.price)||0});
       setCourses(p=>[r.data,...p]);
       setForm(EMPTY); setShowForm(false);
-      showToast("Course created! 🎉 Trainees can now see and enroll.");
+      showToast("Course created! 🎉 Learners can now see and enroll.");
       fetchStats();
     } catch(e) { setFormErr(e?.response?.data?.message||"Failed."); }
     finally { setFormBusy(false); }
@@ -176,7 +175,7 @@ export default function TrainerDashboard() {
 
   return (
     <div style={{display:"flex",minHeight:"100vh",background:"#f9fafb",fontFamily:"ui-sans-serif,system-ui,sans-serif"}}>
-      <Sidebar activeTab={tab} setActiveTab={setTab} navItems={NAV} role="trainer"/>
+      <Sidebar activeTab={tab} setActiveTab={setTab} navItems={NAV} role="Mentor"/>
 
       <main style={{marginLeft:220,flex:1,display:"flex",flexDirection:"column"}}>
         {/* Topbar */}
@@ -184,7 +183,7 @@ export default function TrainerDashboard() {
           <div>
             <h2 style={{fontSize:16,fontWeight:700,color:"#111827",margin:0}}>{getGreeting()}, {user?.name?.split(" ")[0]} 👋</h2>
             <p style={{fontSize:11,color:"#9ca3af",marginTop:2}}>
-              Trainer Dashboard
+              Mentor Dashboard
               {stats.liveNow&&<span style={{marginLeft:8,background:"#fef2f2",color:"#dc2626",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:999}}>🔴 LIVE NOW</span>}
             </p>
           </div>
@@ -275,6 +274,12 @@ export default function TrainerDashboard() {
                         </select>
                       </div>
                     </div>
+                    <div style={{marginBottom:14}}>
+  <label style={LS}>Demo Video URL (optional)</label>
+  <input type="text" value={form.demoVideo} onChange={e=>setForm(p=>({...p,demoVideo:e.target.value}))}
+    placeholder="Paste a YouTube URL or direct .mp4 link — shown free to all Learners"
+    style={IS}/>
+</div>
                     <div style={{marginBottom:16}}>
                       <label style={LS}>Description *</label>
                       <textarea value={form.description} onChange={e=>setForm(p=>({...p,description:e.target.value}))} placeholder="Describe what students will learn..."
@@ -319,12 +324,12 @@ export default function TrainerDashboard() {
                           <td style={{padding:"12px 16px",fontSize:13,color:"#9ca3af"}}>{i+1}</td>
                           <td style={{padding:"12px 16px",fontSize:13,fontWeight:600,color:"#111827"}}>
                             <div style={{display:"flex",alignItems:"center",gap:8}}>
-                              <div style={{width:28,height:28,borderRadius:"50%",background:"#ccfbf1",color:"#0f766e",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700}}>{s.trainee?.name?.[0]?.toUpperCase()||"?"}</div>
-                              {s.trainee?.name||"—"}
+                              <div style={{width:28,height:28,borderRadius:"50%",background:"#ccfbf1",color:"#0f766e",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700}}>{s.Learner?.name?.[0]?.toUpperCase()||"?"}</div>
+                              {s.Learner?.name||"—"}
                             </div>
                           </td>
-                          <td style={{padding:"12px 16px",fontSize:13,color:"#6b7280"}}>{s.trainee?.email||"—"}</td>
-                          <td style={{padding:"12px 16px",fontSize:13,color:"#6b7280"}}>{s.trainee?.phone||"—"}</td>
+                          <td style={{padding:"12px 16px",fontSize:13,color:"#6b7280"}}>{s.Learner?.email||"—"}</td>
+                          <td style={{padding:"12px 16px",fontSize:13,color:"#6b7280"}}>{s.Learner?.phone||"—"}</td>
                           <td style={{padding:"12px 16px",fontSize:13,color:"#6b7280"}}>{new Date(s.createdAt).toLocaleDateString()}</td>
                         </tr>
                       ))}
@@ -339,8 +344,8 @@ export default function TrainerDashboard() {
           {tab==="reviews"&&(
             <div>
               <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:4}}>⭐ Course Reviews</h2>
-              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>See what trainees think about your courses</p>
-              {loadingR?<Spinner/>:reviews.length===0?<Empty icon="⭐" title="No reviews yet" desc="Reviews appear after trainees rate your courses"/>:(
+              <p style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>See what Learners think about your courses</p>
+              {loadingR?<Spinner/>:reviews.length===0?<Empty icon="⭐" title="No reviews yet" desc="Reviews appear after Learners rate your courses"/>:(
                 <div style={{display:"flex",flexDirection:"column",gap:16}}>
                   {reviews.map(({course,reviews:revs,avgRating})=>(
                     <div key={course._id} style={{background:"#fff",borderRadius:12,border:"1px solid #f3f4f6",padding:20}}>
@@ -359,7 +364,7 @@ export default function TrainerDashboard() {
                           {revs.map(r=>(
                             <div key={r._id} style={{background:"#f9fafb",borderRadius:8,padding:"10px 14px"}}>
                               <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                                <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{r.user?.name||"Trainee"}</span>
+                                <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{r.user?.name||"Learner"}</span>
                                 <div style={{display:"flex"}}>{stars(r.rating)}</div>
                               </div>
                               {r.comment&&<p style={{fontSize:12,color:"#374151",margin:0,fontStyle:"italic"}}>"{r.comment}"</p>}
@@ -379,7 +384,7 @@ export default function TrainerDashboard() {
           {tab==="live"&&(
             <div style={{maxWidth:620}}>
               <h2 style={{fontSize:18,fontWeight:700,color:"#111827",marginBottom:4}}>🔴 Go Live</h2>
-              <p style={{fontSize:13,color:"#9ca3af",marginBottom:24}}>Start a live session — meeting link auto-generated, trainees notified instantly via Socket.io!</p>
+              <p style={{fontSize:13,color:"#9ca3af",marginBottom:24}}>Start a live session — meeting link auto-generated, Learners notified instantly via Socket.io!</p>
               {isLive&&liveSession?(
                 <div style={{background:"linear-gradient(135deg,#fef2f2,#fee2e2)",border:"2px solid #fca5a5",borderRadius:16,padding:28,textAlign:"center",marginBottom:24}}>
                   <div style={{width:64,height:64,borderRadius:"50%",background:"#dc2626",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 16px"}}>🔴</div>
@@ -400,9 +405,9 @@ export default function TrainerDashboard() {
                   <form onSubmit={handleGoLive}>
                     <F label="Session Title *" value={liveForm.title} onChange={v=>setLiveForm(p=>({...p,title:v}))} ph="e.g. React Hooks Deep Dive"/>
                     <div style={{marginTop:14}}>
-                      <label style={LS}>Course (Optional — notifies only enrolled trainees)</label>
+                      <label style={LS}>Course (Optional — notifies only enrolled Learners)</label>
                       <select value={liveForm.courseId} onChange={e=>setLiveForm(p=>({...p,courseId:e.target.value}))} style={{...IS,background:"#fff"}}>
-                        <option value="">— Notify ALL trainees on platform —</option>
+                        <option value="">— Notify ALL Learners on platform —</option>
                         {courses.map(c=><option key={c._id} value={c._id}>{c.title}</option>)}
                       </select>
                     </div>
@@ -415,7 +420,7 @@ export default function TrainerDashboard() {
                       ✅ Auto-generates a free Jitsi Meet link if left blank — no account or payment needed
                     </div>
                     <button type="submit" disabled={liveBusy} style={{width:"100%",background:liveBusy?"#fca5a5":"#dc2626",color:"#fff",border:"none",borderRadius:10,padding:"12px",fontSize:15,fontWeight:700,cursor:liveBusy?"not-allowed":"pointer"}}>
-                      {liveBusy?"Starting...":"🔴 Go Live Now — Notify Trainees"}
+                      {liveBusy?"Starting...":"🔴 Go Live Now — Notify Learners"}
                     </button>
                   </form>
                 </div>
@@ -474,7 +479,7 @@ export default function TrainerDashboard() {
                 <div style={{textAlign:"center",marginBottom:24}}>
                   <div style={{width:72,height:72,borderRadius:"50%",background:"linear-gradient(135deg,#0d9488,#7c3aed)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,fontWeight:700,margin:"0 auto 10px"}}>{user?.name?.[0]?.toUpperCase()}</div>
                   <p style={{fontWeight:700,color:"#111827",fontSize:16,margin:0}}>{user?.name}</p>
-                  <span style={{fontSize:11,padding:"2px 10px",borderRadius:999,background:"#dbeafe",color:"#1d4ed8",fontWeight:600}}>Trainer</span>
+                  <span style={{fontSize:11,padding:"2px 10px",borderRadius:999,background:"#dbeafe",color:"#1d4ed8",fontWeight:600}}>Mentor</span>
                 </div>
                 {profErr&&<div style={{background:"#fef2f2",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>⚠️ {profErr}</div>}
                 <form onSubmit={handleProfile}>

@@ -1,209 +1,171 @@
-"""
-OpenGig ML Service — Course Recommendation Engine
-Uses TF-IDF + Cosine Similarity to recommend courses
-Port: 5001
-"""
-
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify
 from flask_cors import CORS
+from pymongo import MongoClient
+from bson import ObjectId
 import numpy as np
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.decomposition import TruncatedSVD
 
 app = Flask(__name__)
 CORS(app)
 
-# ── TF-IDF from scratch (no sklearn needed) ───────────────────────────────────
-import math
-import re
-from collections import Counter
+client = MongoClient("mongodb://localhost:27017/")
+db = client["opengig"]
 
-def tokenize(text):
-    """Clean and tokenize text."""
-    text = str(text).lower()
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
-    return [w for w in text.split() if len(w) > 2]
+# ─────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────
 
-def compute_tfidf(docs):
-    """Compute TF-IDF matrix for a list of documents."""
-    N = len(docs)
-    if N == 0:
-        return [], {}
+def get_all_courses():
+    courses = list(db.courses.find({"isPublished": True}))
+    for c in courses:
+        c["_id"] = str(c["_id"])
+        c["Mentor"] = str(c.get("Mentor", ""))
+    return courses
 
-    tokenized = [tokenize(d) for d in docs]
+def get_all_reviews():
+    reviews = list(db.reviews.find({}))
+    result = []
+    for r in reviews:
+        result.append({
+            "LearnerId": str(r["Learner"]),
+            "courseId":  str(r["course"]),
+            "rating":    r.get("rating", 0)
+        })
+    return result
 
-    # Build vocabulary
-    vocab = set()
-    for tokens in tokenized:
-        vocab.update(tokens)
-    vocab = sorted(vocab)
-    word_idx = {w: i for i, w in enumerate(vocab)}
-
-    # IDF
-    idf = {}
-    for word in vocab:
-        df = sum(1 for tokens in tokenized if word in tokens)
-        idf[word] = math.log((N + 1) / (df + 1)) + 1  # smooth
-
-    # TF-IDF vectors
-    vectors = []
-    for tokens in tokenized:
-        tf = Counter(tokens)
-        total = max(len(tokens), 1)
-        vec = [0.0] * len(vocab)
-        for word, count in tf.items():
-            if word in word_idx:
-                vec[word_idx[word]] = (count / total) * idf[word]
-        vectors.append(vec)
-
-    return vectors, idf, word_idx
-
-def cosine_similarity(a, b):
-    """Cosine similarity between two vectors."""
-    dot   = sum(x * y for x, y in zip(a, b))
-    normA = math.sqrt(sum(x * x for x in a))
-    normB = math.sqrt(sum(y * y for y in b))
-    if normA == 0 or normB == 0:
-        return 0.0
-    return dot / (normA * normB)
-
-def query_vector(query_text, idf, word_idx):
-    """Build a TF-IDF vector for a query string."""
-    tokens = tokenize(query_text)
-    tf = Counter(tokens)
-    total = max(len(tokens), 1)
-    vec = [0.0] * len(word_idx)
-    for word, count in tf.items():
-        if word in word_idx:
-            vec[word_idx[word]] = (count / total) * idf.get(word, 1.0)
-    return vec
+def get_user_enrollments(user_id):
+    enrollments = list(db.enrollments.find({"Learner": ObjectId(user_id)}))
+    return [str(e["course"]) for e in enrollments]
 
 
-# ── HEALTH CHECK ──────────────────────────────────────────────────────────────
-@app.route("/", methods=["GET"])
+# ─────────────────────────────────────────────
+# CONTENT-BASED FILTERING (TF-IDF)
+# ─────────────────────────────────────────────
+
+def content_based_scores(enrolled_course_ids, courses):
+    course_ids = [c["_id"] for c in courses]
+
+    corpus = []
+    for c in courses:
+        tags = " ".join(c.get("tags", []))
+        text = f"{c['title']} {c.get('description', '')} {tags} {c.get('category', '')} {c.get('level', '')}"
+        corpus.append(text)
+
+    tfidf = TfidfVectorizer(stop_words="english")
+    tfidf_matrix = tfidf.fit_transform(corpus)
+    sim_matrix = cosine_similarity(tfidf_matrix)
+
+    enrolled_indices = [i for i, cid in enumerate(course_ids) if cid in enrolled_course_ids]
+
+    if not enrolled_indices:
+        return {cid: 0.0 for cid in course_ids}
+
+    avg_sim = np.mean(sim_matrix[enrolled_indices], axis=0)
+    return {course_ids[i]: float(avg_sim[i]) for i in range(len(course_ids))}
+
+
+# ─────────────────────────────────────────────
+# COLLABORATIVE FILTERING (SVD)
+# ─────────────────────────────────────────────
+
+def collaborative_scores(user_id, courses):
+    reviews = get_all_reviews()
+    all_course_ids = [c["_id"] for c in courses]
+
+    if not reviews:
+        return {cid: 0.0 for cid in all_course_ids}
+
+    df = pd.DataFrame(reviews)
+    matrix = df.pivot_table(index="LearnerId", columns="courseId", values="rating", fill_value=0)
+
+    if user_id not in matrix.index:
+        return {cid: 0.0 for cid in all_course_ids}
+
+    n_components = min(10, matrix.shape[0] - 1, matrix.shape[1] - 1)
+    if n_components < 1:
+        return {cid: 0.0 for cid in all_course_ids}
+
+    svd = TruncatedSVD(n_components=n_components, random_state=42)
+    latent = svd.fit_transform(matrix.values)
+    reconstructed = np.dot(latent, svd.components_)
+
+    user_idx = list(matrix.index).index(user_id)
+    user_scores = reconstructed[user_idx]
+
+    min_s, max_s = user_scores.min(), user_scores.max()
+    if max_s - min_s > 0:
+        user_scores = (user_scores - min_s) / (max_s - min_s)
+
+    matrix_course_ids = list(matrix.columns)
+    cf_scores = {matrix_course_ids[i]: float(user_scores[i]) for i in range(len(matrix_course_ids))}
+
+    for cid in all_course_ids:
+        if cid not in cf_scores:
+            cf_scores[cid] = 0.0
+
+    return cf_scores
+
+
+# ─────────────────────────────────────────────
+# HYBRID RECOMMENDER
+# ─────────────────────────────────────────────
+
+def hybrid_recommend(user_id, top_n=6, alpha=0.5):
+    courses = get_all_courses()
+    enrolled_ids = get_user_enrollments(user_id)
+
+    cb_scores = content_based_scores(enrolled_ids, courses)
+    cf_scores = collaborative_scores(user_id, courses)
+
+    # Auto fallback to content-only for cold start users
+    has_cf_data = any(v > 0 for v in cf_scores.values())
+    effective_alpha = alpha if has_cf_data else 1.0
+
+    hybrid_scores = {}
+    for c in courses:
+        cid = c["_id"]
+        if cid in enrolled_ids:
+            continue  # skip already enrolled
+        cb = cb_scores.get(cid, 0.0)
+        cf = cf_scores.get(cid, 0.0)
+        hybrid_scores[cid] = effective_alpha * cb + (1 - effective_alpha) * cf
+
+    ranked = sorted(hybrid_scores.items(), key=lambda x: x[1], reverse=True)
+    top_ids = [cid for cid, _ in ranked[:top_n]]
+
+    recommended = [c for c in courses if c["_id"] in top_ids]
+    for c in recommended:
+        c["score"] = round(hybrid_scores[c["_id"]], 4)
+        c["method"] = "hybrid" if has_cf_data else "content-based"
+
+    recommended.sort(key=lambda c: c["score"], reverse=True)
+    return recommended
+
+
+# ─────────────────────────────────────────────
+# ROUTES
+# ─────────────────────────────────────────────
+
+@app.route("/recommend/<user_id>", methods=["GET"])
+def recommend(user_id):
+    try:
+        results = hybrid_recommend(user_id, top_n=6, alpha=0.5)
+        return jsonify({
+            "userId": user_id,
+            "count": len(results),
+            "recommendations": results
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/health", methods=["GET"])
 def health():
-    return jsonify({ "status": "OpenGig ML Service running ✅", "port": 5001 })
-
-
-# ── RECOMMEND ─────────────────────────────────────────────────────────────────
-@app.route("/recommend", methods=["POST"])
-def recommend():
-    """
-    Input JSON:
-    {
-      "user_skills": ["python", "machine learning"],
-      "enrolled_courses": [{ "title": "...", "description": "...", "tags": [...] }],
-      "all_courses": [{ "_id": "...", "title": "...", "description": "...", "tags": [...], "category": "..." }]
-    }
-
-    Output JSON:
-    { "recommendations": [{ "_id": "...", "score": 0.85, ... }] }
-    """
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({ "error": "No JSON body received" }), 400
-
-        user_skills      = data.get("user_skills", [])
-        enrolled_courses = data.get("enrolled_courses", [])
-        all_courses      = data.get("all_courses", [])
-
-        if not all_courses:
-            return jsonify({ "recommendations": [] })
-
-        # Build user profile text from skills + enrolled course content
-        user_profile_parts = list(user_skills)
-        for c in enrolled_courses:
-            user_profile_parts.append(c.get("title", ""))
-            user_profile_parts.append(c.get("description", ""))
-            tags = c.get("tags", [])
-            if isinstance(tags, list):
-                user_profile_parts.extend(tags)
-            user_profile_parts.append(c.get("category", ""))
-
-        user_profile = " ".join(str(p) for p in user_profile_parts if p)
-
-        # Build course documents
-        enrolled_ids = set(str(c.get("_id", "")) for c in enrolled_courses)
-
-        # Filter out already enrolled
-        candidate_courses = [c for c in all_courses if str(c.get("_id", "")) not in enrolled_ids]
-
-        if not candidate_courses:
-            return jsonify({ "recommendations": [] })
-
-        # Build corpus: user profile + all candidate course docs
-        course_docs = []
-        for c in candidate_courses:
-            tags = c.get("tags", [])
-            tags_str = " ".join(tags) if isinstance(tags, list) else ""
-            doc = f"{c.get('title','')} {c.get('description','')} {tags_str} {c.get('category','')}"
-            course_docs.append(doc)
-
-        all_docs = [user_profile] + course_docs
-
-        # TF-IDF
-        vectors, idf, word_idx = compute_tfidf(all_docs)
-        if not vectors:
-            return jsonify({ "recommendations": [] })
-
-        user_vec    = vectors[0]
-        course_vecs = vectors[1:]
-
-        # Score each course
-        scored = []
-        for i, course in enumerate(candidate_courses):
-            score = cosine_similarity(user_vec, course_vecs[i])
-            scored.append({ **course, "score": round(score, 4) })
-
-        # Sort by score descending
-        scored.sort(key=lambda x: x["score"], reverse=True)
-
-        # Return top 10
-        top = scored[:10]
-
-        return jsonify({ "recommendations": top })
-
-    except Exception as e:
-        print(f"Recommendation error: {e}")
-        return jsonify({ "error": str(e), "recommendations": [] }), 500
-
-
-# ── SIMILAR COURSES ───────────────────────────────────────────────────────────
-@app.route("/similar", methods=["POST"])
-def similar():
-    """Find courses similar to a given course."""
-    try:
-        data = request.get_json()
-        source_course = data.get("course", {})
-        all_courses   = data.get("all_courses", [])
-
-        if not source_course or not all_courses:
-            return jsonify({ "similar": [] })
-
-        source_text = f"{source_course.get('title','')} {source_course.get('description','')} {' '.join(source_course.get('tags',[]))}"
-        other       = [c for c in all_courses if str(c.get("_id","")) != str(source_course.get("_id",""))]
-
-        docs = [source_text] + [
-            f"{c.get('title','')} {c.get('description','')} {' '.join(c.get('tags',[]))}"
-            for c in other
-        ]
-
-        vectors, _, _ = compute_tfidf(docs)
-        if not vectors:
-            return jsonify({ "similar": [] })
-
-        src_vec = vectors[0]
-        scored  = []
-        for i, c in enumerate(other):
-            score = cosine_similarity(src_vec, vectors[i+1])
-            scored.append({ **c, "score": round(score, 4) })
-
-        scored.sort(key=lambda x: x["score"], reverse=True)
-        return jsonify({ "similar": scored[:5] })
-
-    except Exception as e:
-        return jsonify({ "error": str(e), "similar": [] }), 500
+    return jsonify({"status": "ok", "service": "OpenGig ML Recommender"})
 
 
 if __name__ == "__main__":
-    print("🤖 OpenGig ML Service starting on port 5001...")
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    app.run(port=5001, debug=True)

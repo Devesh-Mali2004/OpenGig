@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 
 const Signup = () => {
-    const [role, setRole] = useState('trainee');
+    const [role, setRole] = useState('Learner');
     const [formData, setFormData] = useState({ name: '', email: '', password: '', bio: '', skills: '', interests: '' });
     const navigate = useNavigate();
 
@@ -18,15 +18,15 @@ const Signup = () => {
         try {
             const res = await axios.post('http://localhost:5000/api/auth/signup', payload);
             localStorage.setItem('user', JSON.stringify(res.data.user));
-            navigate(role === 'trainer' ? '/mentor-dashboard' : '/learner-dashboard');
+            navigate(role === 'Mentor' ? '/mentor-dashboard' : '/learner-dashboard');
         } catch (err) { alert(err.response.data.message); }
     };
 
     return (
         <div className="auth-form">
             <div className="tabs">
-                <button onClick={() => setRole('trainee')} className={role==='trainee'?'active':''}>Learner</button>
-                <button onClick={() => setRole('trainer')} className={role==='trainer'?'active':''}>Mentor</button>
+                <button onClick={() => setRole('Learner')} className={role==='Learner'?'active':''}>Learner</button>
+                <button onClick={() => setRole('Mentor')} className={role==='Mentor'?'active':''}>Mentor</button>
             </div>
             <form onSubmit={handleSubmit}>
                 <input type="text" placeholder="Name" onChange={e => setFormData({...formData, name:e.target.value})} required />
@@ -34,7 +34,7 @@ const Signup = () => {
                 <input type="password" placeholder="Password" onChange={e => setFormData({...formData, password:e.target.value})} required />
                 <textarea placeholder="Bio" onChange={e => setFormData({...formData, bio:e.target.value})} />
                 
-                {role === 'trainer' ? 
+                {role === 'Mentor' ? 
                     <input type="text" placeholder="Skills (comma separated)" onChange={e => setFormData({...formData, skills:e.target.value})} /> :
                     <input type="text" placeholder="Interests (comma separated)" onChange={e => setFormData({...formData, interests:e.target.value})} />
                 }

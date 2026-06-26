@@ -9,7 +9,7 @@ import { useAuth } from "../context/AuthContext";
  * Props:
  *   roomName  — unique room ID (e.g. course ID or session ID)
  *   onClose   — callback when call ends
- *   isHost    — true if trainer (can mute others, end call)
+ *   isHost    — true if Mentor (can mute others, end call)
  */
 export default function VideoCall({ roomName, onClose, isHost = false }) {
   const { user } = useAuth();
