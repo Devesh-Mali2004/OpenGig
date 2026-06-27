@@ -20,8 +20,8 @@ const adminOnly = (req, res, next) => {
 };
 
 const trainerOnly = (req, res, next) => {
-    if (req.user && req.user.role === "trainer") next();
-    else res.status(403).json({ message: "Trainer access only" });
+    if (req.user && req.user.role === "Mentor") next();
+    else res.status(403).json({ message: "Mentor access only" });
 };
 
 module.exports = { protect, adminOnly, trainerOnly };

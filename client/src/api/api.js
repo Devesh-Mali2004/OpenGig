@@ -33,7 +33,7 @@ export const getCourseById     = id => API.get(`/courses/${id}`);
 export const createCourse      = d  => API.post("/courses", d);
 export const updateCourse      = (id,d) => API.put(`/courses/${id}`, d);
 export const deleteCourse      = id => API.delete(`/courses/${id}`);
-export const getMentorCourses = () => API.get("/courses/Mentor/my-courses");
+export const getMentorCourses = () => API.get("/courses/trainer/my-courses");
 
 // ENROLLMENTS
 export const enrollCourse      = id => API.post("/enrollments", { courseId: id });

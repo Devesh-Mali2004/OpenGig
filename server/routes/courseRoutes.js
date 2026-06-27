@@ -8,10 +8,11 @@ const {
 const { protect, trainerOnly } = require("../middleware/authMiddleware");
 // Public
 router.get("/",            getAllCourses);
-router.get("/:id",         getCourseById);
+
 
 // Protected — Mentor must be authenticated
 router.get("/trainer/my-courses", protect, trainerOnly, getMyCourses);
+router.get("/:id",         getCourseById);
 router.post("/",           protect, trainerOnly, createCourse);
 router.put("/:id",         protect, trainerOnly, updateCourse);
 router.delete("/:id",      protect, trainerOnly, deleteCourse);
